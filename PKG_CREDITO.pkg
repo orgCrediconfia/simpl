@@ -1,0 +1,1584 @@
+create or replace
+PACKAGE PKG_CREDITO AS
+
+    -- Declaración de variables globales
+    vgFechaSistema                      DATE;
+    cFalso                              CONSTANT VARCHAR2(1)                        := 'F';
+    cVerdadero                          CONSTANT VARCHAR2(1)                        := 'V';
+    cDivisaPeso                         CONSTANT PFIN_MOVIMIENTO.CVE_DIVISA%TYPE    := 'MXP';
+    cPagoPrestamo                       CONSTANT PFIN_MOVIMIENTO.CVE_OPERACION%TYPE := 'CRPAGOPRES';
+    cSitCancelada                       CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE  := 'CA';
+    
+    -- Procedimiento que actuliza la informacion variable de los creditos, esto lo realiza para todas las amortizaciones
+    -- pendientes de pago
+    --      Por atraso: Pago tardio, interes moratorio e IVA de interes moratorio
+    --      Intereses devengados: Interes devengado del dia e interes devengado acumulado en el mes
+    FUNCTION fActualizaInformacionCredito(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                          pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                          pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER;    
+
+    --********************************************************************************************************--
+    --*     pGeneraTablaAmortizacion                                                                         *--
+    --*     Propósito:  Generar la tabla de amortización de un préstamo de un cliente                        *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPrestamo:        Indentificador del préstamo                                              *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    PROCEDURE pGeneraTablaAmortizacion(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                       pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                       pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                                       pTxrespuesta     OUT VARCHAR2);
+
+
+    FUNCTION pAplicaPagoCreditoPorAmort(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                         pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                         pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                         pNumAmortizacion IN SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE,                                         
+                                         pImportePago     IN PFIN_MOVIMIENTO.IMP_NETO%TYPE,
+                                         pIdCuenta        IN PFIN_MOVIMIENTO.ID_CUENTA%TYPE,
+                                         pCveUsuario      IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                         pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                         pTxrespuesta     OUT VARCHAR2)
+    RETURN NUMBER;
+
+    --********************************************************************************************************--
+    --*     pAplicaPagoCredito                                                                               *--
+    --*     Propósito:  Aplicar el pago de un préstamo y distribuirlo en los diferentes conceptos            *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPrestamo         Identificador del préstamo                                               *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    PROCEDURE pAplicaPagoCredito(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                 pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                 pCveUsuario      IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                 pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                 pTxrespuesta     OUT VARCHAR2);
+
+    --********************************************************************************************************--
+    --*     DameFechaValida                                                                                  *--
+    --*     Propósito:  Obtener una fecha válida para las amortizaciones y fechas de liquidación             *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pFecha              Fecha a validar                                                          *--
+    --*         pCvePais            Clave del país a validar días festivos                                   *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    FUNCTION DameFechaValida (pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                              pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                              pFecha           IN SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE,
+                              pCvePais         IN PFIN_DIA_FESTIVO.CVE_PAIS%TYPE,
+                              pTxRespuesta    OUT VARCHAR2)
+    RETURN SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+
+
+    --********************************************************************************************************--
+    --*     DameTasaMoratoriaDiaria                                                                          *--
+    --*     Propósito:  Obtener la tasa de interés moratorio en caso de aplicar, de lo contrario regresa 0   *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPrestamo         Identificador del préstamo                                               *--
+    --********************************************************************************************************--
+    FUNCTION DameTasaMoratoriaDiaria(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                     pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE)
+    RETURN SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+
+    --********************************************************************************************************--
+    --*     dameIdTasaRefDet                                                                                 *--
+    --*     Propósito:  Obtener el Id de referencia más actual de una tasa                                   *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdTasaRef:         Identificador de la tasa de referencia                                   *--
+    --********************************************************************************************************--
+    FUNCTION dameIdTasaRefDet(  pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdTasaRef      IN SIM_CAT_TASA_REFER_DETALLE.ID_TASA_REFERENCIA%TYPE)
+    RETURN SIM_CAT_TASA_REFER_DETALLE.ID_TASA_REFERENCIA_DETALLE%TYPE;
+    
+    -- Metodo que se ejecuta para actualizar los acumulados de la tabla de amortizacion
+    PROCEDURE pActualizaTablaAmortizacion(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                          pIdMovimiento    IN PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE,
+                                          pTxRespuesta     OUT VARCHAR2);    
+
+    -- Funcion que determina la proporcion del pago de acuerdo a un importe
+    FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                pImpPago         IN PFIN_MOVIMIENTO.IMP_NETO%TYPE,
+                                pTxRespuesta     OUT VARCHAR2)
+    RETURN SYS_REFCURSOR;
+
+END PKG_CREDITO;
+/
+
+create or replace
+PACKAGE BODY PKG_CREDITO AS
+
+    FUNCTION dameIdTasaRefDet(  pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdTasaRef      IN SIM_CAT_TASA_REFER_DETALLE.ID_TASA_REFERENCIA%TYPE)
+    RETURN SIM_CAT_TASA_REFER_DETALLE.ID_TASA_REFERENCIA_DETALLE%TYPE
+    IS 
+        IdTasaRefDet  SIM_CAT_TASA_REFER_DETALLE.ID_TASA_REFERENCIA_DETALLE%TYPE;
+        vlFBusqueda   DATE;
+    BEGIN
+        -- Inicializa la fecha de busqueda con la fecha del sistema
+        vlFBusqueda := vgFechaSistema;
+    
+        -- Se obtiene la tasa de referencia de la fecha mas cercana a la fecha de busqueda siempre y cuando sea menor o igual a la fecha de busqueda
+        SELECT  NVL(ID_TASA_REFERENCIA_DETALLE,0)
+        INTO    IdTasaRefDet
+        FROM    SIM_CAT_TASA_REFER_DETALLE
+        WHERE   CVE_GPO_EMPRESA             = pCveGpoEmpresa
+            AND CVE_EMPRESA                 = pCveEmpresa
+            AND ID_TASA_REFERENCIA          = pIdTasaRef
+            AND FECHA_PUBLICACION           = (SELECT NVL(MAX(FECHA_PUBLICACION),NULL)
+                                                 FROM SIM_CAT_TASA_REFER_DETALLE
+                                                WHERE CVE_GPO_EMPRESA             = pCveGpoEmpresa
+                                                  AND CVE_EMPRESA                 = pCveEmpresa
+                                                  AND ID_TASA_REFERENCIA          = pIdTasaRef
+                                                  AND FECHA_PUBLICACION          <= vlFBusqueda);
+                
+        RETURN IdTasaRefDet;
+        
+        EXCEPTION
+            WHEN OTHERS THEN
+                RETURN NULL;
+    END dameIdTasaRefDet;
+
+    PROCEDURE AsignaFechaSistema(pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE)
+    IS 
+    BEGIN
+        -- Obtiene la fecha del sistema y actualiza la variable global vgFechaSistema
+        SELECT F_MEDIO
+          INTO vgFechaSistema
+          FROM PFIN_PARAMETRO
+         WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+           AND CVE_EMPRESA     = pCveEmpresa
+           AND CVE_MEDIO       = 'SYSTEM';
+    END AsignaFechaSistema;
+
+    FUNCTION DameTasaAmort(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                           pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                           pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                           pTasaIva         IN SIM_CAT_SUCURSAL.TASA_IVA%TYPE,
+                           pTxRespuesta    OUT VARCHAR2)
+    RETURN SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE
+    IS
+        vlTasaInteres   SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+    BEGIN
+        -- Se obtiene el valor de la tasa, en caso de no ser indexada toma la tasa del prestamo, de lo contrario
+        -- toma la tasa de referencia.
+        -- A la tasa que obtiene le suma el IVA que recibe como parametro
+        -- Al valor resultante lo divide entre los dias de la periodicidad del prestamo em caso de no ser indexada la tasa
+        -- de lo contrario lo divide entre la periodicidad de la tasa de referencia.
+        -- por ultimo multiplica el dato por los dias del prestamo.
+        SELECT 	ROUND(DECODE(P.TIPO_TASA,'No indexada', P.VALOR_TASA, T.VALOR)
+                        * (1 + pTasaIva / 100) / 100
+					              / DECODE(P.TIPO_TASA,'No indexada', PT.DIAS, PTI.DIAS)
+					              * PP.DIAS
+                      ,20) AS TASA_INTERES
+           INTO vlTasaInteres
+           FROM SIM_PRESTAMO P, SIM_CAT_PERIODICIDAD PT, SIM_CAT_PERIODICIDAD PTI,
+                SIM_CAT_PERIODICIDAD PP, SIM_CAT_TASA_REFER_DETALLE T, SIM_CAT_TASA_REFERENCIA TR
+          WHERE P.CVE_GPO_EMPRESA 	        = pCveGpoEmpresa
+            AND P.CVE_EMPRESA     	        = pCveEmpresa
+            AND P.ID_PRESTAMO     	        = pIdPrestamo
+            AND P.CVE_GPO_EMPRESA 	        = PT.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = PT.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_TASA      = PT.ID_PERIODICIDAD(+)
+            AND P.CVE_GPO_EMPRESA 	        = PP.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = PP.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_PRODUCTO  = PP.ID_PERIODICIDAD(+)
+            AND P.CVE_GPO_EMPRESA 	        = TR.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = TR.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA        = TR.ID_TASA_REFERENCIA(+)
+            AND P.CVE_GPO_EMPRESA 	        = T.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = T.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA        = T.ID_TASA_REFERENCIA(+)
+            AND P.FECHA_TASA_REFERENCIA     = T.FECHA_PUBLICACION(+)
+            AND TR.CVE_GPO_EMPRESA 	        = PTI.CVE_GPO_EMPRESA(+)
+            AND TR.CVE_EMPRESA     	        = PTI.CVE_EMPRESA(+)
+            AND TR.ID_PERIODICIDAD          = PTI.ID_PERIODICIDAD(+);
+
+        IF vlTasaInteres IS NULL THEN
+            -- Si no se pbtiene un valor regresa 0 y se indica el error
+            pTxRespuesta := 'No se pudo obtener el valor de la tasa';
+            RETURN 0;
+        END IF;
+
+        RETURN vlTasaInteres;
+
+        EXCEPTION
+            WHEN OTHERS THEN
+                pTxRespuesta := SQLERRM;
+                RETURN 0;
+
+    END DameTasaAmort;
+
+    FUNCTION DameTasaMoratoriaDiaria(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                     pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE)
+    RETURN SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE
+    IS
+        vlTasaIntMora   SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+    BEGIN
+        -- Se obtiene el valor de la tasa
+        SELECT NVL(CASE WHEN P.ID_TIPO_RECARGO IN (3,5) THEN -- Si el tipo de recargo implica interés moratorio regresa el valor de la tasa
+                             CASE WHEN P.TIPO_TASA_RECARGO = 'Fija independiente' THEN 
+                                       ROUND(DECODE(P.TIPO_TASA,'No indexada', P.TASA_RECARGO, T.VALOR)/100/
+            			 		                 DECODE(P.TIPO_TASA,'No indexada', PT.DIAS, TRV.DIAS) ,20)
+                                  ELSE P.VALOR_TASA * P.FACTOR_TASA_RECARGO
+                             END
+                        ELSE 0 -- Si el recargo no es de tipo interés moratorio regresa 0 en el valor de la tasa
+                   END, 0) AS TASA_INTERES_MORATORIO
+          INTO vlTasaIntMora
+          FROM SIM_PRESTAMO P, SIM_CAT_SUCURSAL S, SIM_CAT_PERIODICIDAD PT, SIM_CAT_PERIODICIDAD TRV, 
+               SIM_CAT_TASA_REFER_DETALLE T, SIM_CAT_TASA_REFERENCIA TR
+          WHERE P.CVE_GPO_EMPRESA 	            = pCveGpoEmpresa
+            AND P.CVE_EMPRESA     	            = pCveEmpresa
+            AND P.ID_PRESTAMO     	            = pIdPrestamo
+            --  Recupera la informacion de la sucursal
+            AND P.CVE_GPO_EMPRESA 	            = S.CVE_GPO_EMPRESA
+            AND P.CVE_EMPRESA     	            = S.CVE_EMPRESA
+            AND P.ID_SUCURSAL                   = S.ID_SUCURSAL
+            --  Periodicidad de la tasa de recargo
+            AND P.CVE_GPO_EMPRESA 	            = PT.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	            = PT.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_TASA_RECARGO  = PT.ID_PERIODICIDAD(+)
+            --  Relación con la tasa de referencia
+            AND P.CVE_GPO_EMPRESA 	            = TR.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	            = TR.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA_RECARGO    = TR.ID_TASA_REFERENCIA(+)
+            --  Relación con el detalle de la tasa de referencia
+            AND TR.CVE_GPO_EMPRESA 	            = TRV.CVE_GPO_EMPRESA(+)
+            AND TR.CVE_EMPRESA     	            = TRV.CVE_EMPRESA(+)
+            AND TR.ID_PERIODICIDAD              = TRV.ID_PERIODICIDAD(+)
+            --  Relación con la tasa de referencia
+            AND P.CVE_GPO_EMPRESA 	            = T.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	            = T.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA_RECARGO    = T.ID_TASA_REFERENCIA(+)
+            -- Se obtiene el máximo de id referencia detalle, esto es la tasa más actual
+            AND PKG_CREDITO.dameidtasarefdet(P.CVE_GPO_EMPRESA,P.CVE_EMPRESA,
+                P.ID_TASA_REFERENCIA_RECARGO) = T.ID_TASA_REFERENCIA_DETALLE(+);
+
+        RETURN vlTasaIntMora;
+
+        EXCEPTION
+            WHEN OTHERS THEN
+                RETURN 0;
+    END DameTasaMoratoriaDiaria;
+
+    FUNCTION DameInteresExtra(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                              pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                              pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                              pSaldoInicial    IN SIM_TABLA_AMORTIZACION.IMP_SALDO_INICIAL%TYPE,
+                              pTasaIva         IN SIM_CAT_SUCURSAL.TASA_IVA%TYPE,
+                              pTxRespuesta    OUT VARCHAR2)
+    RETURN SIM_TABLA_AMORTIZACION.IMP_INTERES_EXTRA%TYPE
+    IS
+        vlImpInteresExtra   SIM_TABLA_AMORTIZACION.IMP_INTERES_EXTRA%TYPE;
+    BEGIN
+
+        -- Se obtiene el valor de la tasa
+        SELECT 	ROUND(pSaldoInicial * (P.FECHA_REAL - P.FECHA_ENTREGA) / DECODE(P.TIPO_TASA, 'No indexada',  PT.DIAS, PTI.DIAS) * 
+                      (DECODE(P.TIPO_TASA, 'No indexada', P.VALOR_TASA, T.VALOR) * (1 + pTasaIva / 100) ) /100 /P.PLAZO, 10)
+          INTO vlImpInteresExtra
+          FROM SIM_PRESTAMO P, SIM_CAT_PERIODICIDAD PT, SIM_CAT_PERIODICIDAD PTI, SIM_CAT_PERIODICIDAD PP, 
+               SIM_CAT_TASA_REFER_DETALLE T, SIM_CAT_TASA_REFERENCIA TR
+         WHERE  P.CVE_GPO_EMPRESA 	        = pCveGpoEmpresa
+            AND P.CVE_EMPRESA     	        = pCveEmpresa
+            AND P.ID_PRESTAMO     	        = pIdPrestamo
+            AND P.CVE_GPO_EMPRESA 	        = PT.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = PT.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_TASA      = PT.ID_PERIODICIDAD(+)
+            AND P.CVE_GPO_EMPRESA 	        = PP.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = PP.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_PRODUCTO  = PP.ID_PERIODICIDAD(+)
+
+            AND P.CVE_GPO_EMPRESA 	        = TR.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = TR.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA        = TR.ID_TASA_REFERENCIA(+)
+
+            AND P.CVE_GPO_EMPRESA 	        = T.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	        = T.CVE_EMPRESA(+)
+            AND P.ID_TASA_REFERENCIA        = T.ID_TASA_REFERENCIA(+)
+            AND P.FECHA_TASA_REFERENCIA     = T.FECHA_PUBLICACION(+)
+			
+            AND TR.CVE_GPO_EMPRESA 	        = PTI.CVE_GPO_EMPRESA(+)
+            AND TR.CVE_EMPRESA     	        = PTI.CVE_EMPRESA(+)
+            AND TR.ID_PERIODICIDAD          = PTI.ID_PERIODICIDAD(+);
+
+        IF vlImpInteresExtra IS NULL THEN
+            RETURN 0;
+
+        END IF;
+
+        RETURN vlImpInteresExtra;
+
+        EXCEPTION
+            WHEN OTHERS THEN
+                pTxRespuesta := SQLERRM;
+                RETURN 0;
+    END DameInteresExtra;
+
+    FUNCTION DameFechaValida (pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                              pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                              pFecha           IN SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE,
+                              pCvePais         IN PFIN_DIA_FESTIVO.CVE_PAIS%TYPE,
+                              pTxRespuesta    OUT VARCHAR2)
+    RETURN SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE
+    IS
+        vlFechaOK       SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+        vlFechaTemp     SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+        vlBufParametro  PFIN_PARAMETRO%ROWTYPE;
+        vlDia           VARCHAR2(2);
+        lbFechaValida   BOOLEAN := FALSE;
+        
+        FUNCTION esDiaFestivo
+        RETURN BOOLEAN 
+        IS
+           vlFFind     DATE;
+        BEGIN
+            -- Si existe la fecha como fecha válida regresa verdadero de otro modo falso
+            SELECT F_DIA_FESTIVO
+              INTO vlFFind
+              FROM PFIN_DIA_FESTIVO
+             WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+               AND CVE_EMPRESA     = pCveEmpresa
+               AND CVE_PAIS        = pCvePais
+               AND F_DIA_FESTIVO   = vlFechaTemp;
+                
+            RETURN TRUE;
+            
+            EXCEPTION   
+                WHEN NO_DATA_FOUND THEN
+                    RETURN FALSE;
+        END esDiaFestivo;
+        
+    BEGIN
+        -- Se obtienen los datos de la tabla de parámetros
+        SELECT *
+          INTO vlBufParametro
+          FROM PFIN_PARAMETRO
+         WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+           AND CVE_EMPRESA     = pCveEmpresa
+           AND CVE_MEDIO       = 'SYSTEM';
+            
+        vlFechaTemp := pFecha;
+        
+        WHILE 1 = 1 LOOP
+            vlDia := TO_CHAR(vlFechaTemp, 'D');
+        
+            IF vlDia IN ('1','7') OR esDiaFestivo THEN
+                IF vlBufParametro.B_OPERA_DOMINGO           = 'V' AND vlDia = '1'  THEN
+                    RETURN vlFechaTemp;
+                ELSIF vlBufParametro.B_OPERA_SABADO         = 'V' AND vlDia = '7'  THEN
+                    RETURN vlFechaTemp;
+                ELSIF vlBufParametro.B_OPERA_DIA_FESTIVO    = 'V' AND esDiaFestivo THEN
+                    RETURN vlFechaTemp;
+                ELSE
+                    vlFechaTemp := vlFechaTemp + 1;
+                END IF;
+            ELSE
+                RETURN vlFechaTemp;
+            END IF;
+        END LOOP;
+        
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                pTxRespuesta := '';
+                pTxrespuesta := CHR(10)||'No se encontró el parámetro del medio SYSTEM: '||CHR(10)||
+                    ' Grupo Empresa: '||pCveGpoEmpresa||CHR(10)||
+                    ' Empresa:       '||pCveEmpresa;
+                RETURN NULL;
+            WHEN OTHERS THEN
+                pTxRespuesta := SQLERRM;
+                RETURN NULL;
+    END DameFechaValida;
+
+    FUNCTION DameMontoAutorizado(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                 pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                                 pIdCliente       IN SIM_PRESTAMO.ID_CLIENTE%TYPE,
+                                 pTxrespuesta     OUT VARCHAR2)
+    RETURN SIM_CLIENTE_MONTO.MONTO_AUTORIZADO%TYPE
+    IS
+      vlMontoCliente   SIM_CLIENTE_MONTO.MONTO_AUTORIZADO%TYPE;
+    BEGIN
+        -- Se obtiene el monto autorizado
+        SELECT NVL(MONTO_AUTORIZADO, MONTO_SOLICITADO)
+          INTO vlMontoCliente
+          FROM SIM_CLIENTE_MONTO
+         WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+           AND CVE_EMPRESA     = pCveEmpresa
+           AND ID_PRESTAMO     = pIdPrestamo
+           AND ID_CLIENTE      = pIdCliente;
+            
+        RETURN vlMontoCliente;
+
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                pTxrespuesta := CHR(10)||'No se encontró el monto autorizado del cliente: '||CHR(10)||
+                    ' Grupo Empresa: '||pCveGpoEmpresa||CHR(10)||
+                    ' Empresa:       '||pCveEmpresa||CHR(10)||
+                    ' Préstamo:      '||pIdPrestamo||CHR(10)||
+                    ' Cliente:       '||pIdCliente;
+                RETURN 0;
+            WHEN OTHERS THEN
+                pTxRespuesta := SQLERRM;
+                RETURN 0;
+    END DameMontoAutorizado;
+
+    FUNCTION DameCargoInicial(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                              pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                              pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                              pTxrespuesta     OUT VARCHAR2)
+    RETURN  SIM_PRESTAMO_CARGO_COMISION.CARGO_INICIAL%TYPE
+    IS
+        vlCargoInicial   SIM_PRESTAMO_CARGO_COMISION.CARGO_INICIAL%TYPE;
+    BEGIN
+        -- Se obtiene el cargo inicial
+        SELECT SUM(NVL(C.CARGO_INICIAL, C.PORCENTAJE_MONTO / 100 * M.MONTO_AUTORIZADO) ) CARGO_INICIAL
+          INTO vlCargoInicial
+          FROM SIM_PRESTAMO_CARGO_COMISION C, SIM_CLIENTE_MONTO M
+         WHERE C.CVE_GPO_EMPRESA     = pCveGpoEmpresa
+           AND C.CVE_EMPRESA         = pCveEmpresa
+           AND C.ID_PRESTAMO         = pIdPrestamo
+           AND C.ID_FORMA_APLICACION = 1
+           AND M.CVE_GPO_EMPRESA     = C.CVE_GPO_EMPRESA
+           AND M.CVE_EMPRESA         = C.CVE_EMPRESA
+           AND M.ID_PRESTAMO         = C.ID_PRESTAMO;
+
+        RETURN vlCargoInicial;
+
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                pTxrespuesta := CHR(10)||'No se encontró el cargo inicial: '||CHR(10)||
+                    ' Grupo Empresa: '||pCveGpoEmpresa||CHR(10)||
+                    ' Empresa:       '||pCveEmpresa||CHR(10)||
+                    ' Préstamo:      '||pIdPrestamo||CHR(10);
+                RETURN 0;
+            WHEN OTHERS THEN
+                pTxRespuesta := SQLERRM;
+                RETURN 0;
+
+    END DameCargoInicial;
+
+    PROCEDURE pDameInteresMoratorio(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                    pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                    pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                                    pNumPagoAmort    IN SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE,
+                                    pFValor          IN SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE,
+                                    pInteresMora     OUT SIM_TABLA_AMORTIZACION.IMP_INTERES%TYPE,
+                                    pIVAInteresMora  OUT SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE,
+                                    pTxRespuesta     OUT VARCHAR2)
+    IS
+       vlBufTablaAmortizacion       SIM_TABLA_AMORTIZACION%ROWTYPE;
+       vlTasaMoratoria              SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+       vlTasaIVA                    SIM_CAT_SUCURSAL.TASA_IVA%TYPE; 
+       vlFechaCalculoAnt            SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+       vlCapitalPromedioMora        SIM_TABLA_AMORTIZACION.IMP_CAPITAL_AMORT%TYPE;
+       vlCapitalActualizadoAnterior SIM_TABLA_AMORTIZACION.IMP_CAPITAL_AMORT%TYPE;
+       vlImporteAcumulado           SIM_TABLA_AMORTIZACION.IMP_CAPITAL_AMORT%TYPE;
+       vlNumDiasMora                NUMBER;
+       vlNumDiasPeriodo             NUMBER;
+       
+       CURSOR curPagosCapital IS
+           SELECT F_VALOR, SUM(IMP_CAPITAL_PAGADO) AS IMP_CAPITAL_PAGADO
+             FROM (SELECT CASE WHEN NVL(A.F_APLICACION, A.F_LIQUIDACION) <= vlBufTablaAmortizacion.FECHA_AMORTIZACION THEN vlBufTablaAmortizacion.FECHA_AMORTIZACION
+                               ELSE NVL(A.F_APLICACION, A.F_LIQUIDACION)
+                          END AS F_VALOR, B.IMP_CONCEPTO AS IMP_CAPITAL_PAGADO
+                     FROM PFIN_MOVIMIENTO A, PFIN_MOVIMIENTO_DET B, PFIN_CAT_OPERACION C
+                    WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa     AND
+                          A.CVE_EMPRESA           = pCveEmpresa        AND
+                          A.ID_PRESTAMO           = pIdPrestamo        AND
+                          A.NUM_PAGO_AMORTIZACION = pNumPagoAmort      AND              
+                          A.SIT_MOVIMIENTO       <> 'CA'               AND
+                          A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA  AND
+                          A.CVE_EMPRESA           = B.CVE_EMPRESA      AND
+                          A.ID_MOVIMIENTO         = B.ID_MOVIMIENTO    AND
+                          B.CVE_CONCEPTO          = 'CAPITA'           AND
+                          A.CVE_GPO_EMPRESA       = C.CVE_GPO_EMPRESA  AND
+                          A.CVE_EMPRESA           = C.CVE_EMPRESA      AND
+                          A.CVE_OPERACION         = C.CVE_OPERACION    AND
+                          C.CVE_AFECTA_CREDITO    = 'D'
+                    UNION ALL
+                   -- Inserta un registro para la fecha de amortizacion
+                   SELECT vlBufTablaAmortizacion.FECHA_AMORTIZACION AS F_VALOR, 0 AS IMP_CAPITAL_PAGADO
+                     FROM DUAL
+                    UNION ALL
+                   -- Inserta un registro para la fecha en la que se esta realizando el pago
+                   SELECT pFValor AS F_VALOR, 0 AS IMP_CAPITAL_PAGADO
+                     FROM DUAL)
+            GROUP BY F_VALOR
+            ORDER BY F_VALOR;
+
+    BEGIN
+       -- Recupera el registro de la amortizacion correspondiente
+       BEGIN
+          SELECT *
+            INTO vlBufTablaAmortizacion
+            FROM SIM_TABLA_AMORTIZACION
+           WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa   AND
+                 CVE_EMPRESA           = pCveEmpresa      AND
+                 ID_PRESTAMO           = pIdPrestamo      AND
+                 NUM_PAGO_AMORTIZACION = pNumPagoAmort;
+          
+          EXCEPTION 
+               WHEN NO_DATA_FOUND THEN
+                    pTxRespuesta    := 'No existe el registro de la tabla de amortizacion';
+                    pInteresMora    := 0;
+                    pIVAInteresMora := 0;
+       END;
+       
+       -- Recupera la tasa de IVA
+       BEGIN
+         SELECT S.TASA_IVA
+           INTO vlTasaIVA
+           FROM SIM_PRESTAMO P, SIM_CAT_SUCURSAL S
+          WHERE P.CVE_GPO_EMPRESA   = pCveGpoEmpresa     AND
+                P.CVE_EMPRESA       = pCveEmpresa        AND
+                P.ID_PRESTAMO       = pIdPrestamo        AND
+                P.CVE_GPO_EMPRESA   = S.CVE_GPO_EMPRESA  AND
+                P.CVE_EMPRESA       = S.CVE_EMPRESA      AND
+                P.ID_SUCURSAL       = S.ID_SUCURSAL;
+
+          EXCEPTION 
+               WHEN NO_DATA_FOUND THEN
+                    pTxRespuesta    := 'No existe el registro de la SUCURSAL';
+                    pInteresMora    := 0;
+                    pIVAInteresMora := 0;
+       END;
+
+       -- Recupera la tasa moratoria
+       vlTasaMoratoria := PKG_CREDITO.dametasamoratoriadiaria(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo);
+       
+       -- Inicializa datos para calcular el interes moratorio
+       pInteresMora          := 0;  
+       pIVAInteresMora       := 0;
+
+       -- Calcula los dias de mora y en caso de que no haya mora regresa cero
+       vlNumDiasMora         := pFValor - vlBufTablaAmortizacion.FECHA_AMORTIZACION;
+
+       IF vlNumDiasMora <= 0 THEN
+          pTxRespuesta := 'No aplican intereses moratorios';
+          RETURN;
+       END IF;
+       
+       -- Acumula el capital que se debe, en caso de que lo deba por varios dias tiene que multiplicar por el numero de dias
+       FOR vlBufPagos IN curPagosCapital LOOP
+           -- Inicializa el capital pagado a la fecha de amortizacion
+           IF vlBufPagos.F_VALOR = vlBufTablaAmortizacion.FECHA_AMORTIZACION THEN
+              vlCapitalActualizadoAnterior := vlBufTablaAmortizacion.IMP_CAPITAL_AMORT - vlBufPagos.IMP_CAPITAL_PAGADO;
+              vlImporteAcumulado           := 0;
+              vlFechaCalculoAnt            := vlBufTablaAmortizacion.FECHA_AMORTIZACION;
+           ELSE
+              vlNumDiasPeriodo   := vlBufPagos.F_VALOR - vlFechaCalculoAnt;
+              vlImporteAcumulado := vlImporteAcumulado + (vlCapitalActualizadoAnterior * vlNumDiasPeriodo);
+              
+              -- Actualiza los acumulados
+              vlCapitalActualizadoAnterior := vlCapitalActualizadoAnterior - vlBufPagos.IMP_CAPITAL_PAGADO;
+              vlFechaCalculoAnt            := vlBufPagos.F_VALOR;
+           END IF;
+       END LOOP;
+
+       vlCapitalPromedioMora    := vlImporteAcumulado / vlNumDiasMora;
+       
+       pInteresMora             := vlImporteAcumulado * vlTasaMoratoria * vlNumDiasMora;
+       pIVAInteresMora          := pInteresMora * vlTasaIVA;
+       
+    END pDameInteresMoratorio;
+
+    PROCEDURE pActualizaTablaAmortizacion(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                          pIdMovimiento    IN PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE,
+                                          pTxRespuesta     OUT VARCHAR2)
+    IS
+        vlInteresMora       SIM_TABLA_AMORTIZACION.IMP_INTERES%TYPE;
+        vlIVAInteresMora    SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlCapitalPagado     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlInteresPagado     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlIVAInteresPag     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlInteresExtPag     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlIVAIntExtPag      SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlImpPagoTardio     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlImpIntMora        SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlImpIVAIntMora     SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE;
+        vlImpDeuda          SIM_TABLA_AMORTIZACION.IMP_IVA_INTERES%TYPE; 
+        vlIdPrestamo        SIM_TABLA_AMORTIZACION.ID_PRESTAMO%TYPE;
+        vlNumAmortizacion   SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE;
+        vlFValor            SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+        vlBPagado           SIM_TABLA_AMORTIZACION.B_PAGADO%TYPE;
+        
+        -- Cursor de conceptos pagados por el movimiento
+        CURSOR curConceptoPagado IS 
+           SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, A.NUM_PAGO_AMORTIZACION, B.CVE_CONCEPTO, B.IMP_CONCEPTO, C.ID_ACCESORIO
+             FROM PFIN_MOVIMIENTO A, PFIN_MOVIMIENTO_DET B, PFIN_CAT_CONCEPTO C
+            WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa          AND
+                  A.CVE_EMPRESA           = pCveEmpresa             AND
+                  A.ID_MOVIMIENTO         = pIdMovimiento          AND
+                  A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA       AND
+                  A.CVE_EMPRESA           = B.CVE_EMPRESA           AND
+                  A.ID_MOVIMIENTO         = B.ID_MOVIMIENTO         AND
+                  B.CVE_GPO_EMPRESA       = C.CVE_GPO_EMPRESA       AND
+                  B.CVE_EMPRESA           = C.CVE_EMPRESA           AND
+                  B.CVE_CONCEPTO          = C.CVE_CONCEPTO          AND
+                  C.ID_ACCESORIO NOT IN (1,99);
+    BEGIN
+        -- Recupera la informacion del credito desde el movimiento
+        SELECT A.ID_PRESTAMO, A.NUM_PAGO_AMORTIZACION, A.F_APLICACION,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'CAPITA'   THEN IMP_CONCEPTO ELSE 0 END) AS IMP_CAPITAL_AMORT_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'INTERE'   THEN IMP_CONCEPTO ELSE 0 END) AS IMP_INTERES_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'IVAINT'   THEN IMP_CONCEPTO ELSE 0 END) AS IMP_IVA_INTERES_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'INTEXT'   THEN IMP_CONCEPTO ELSE 0 END) AS IMP_INTERES_EXTRA_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'IVAINTEX' THEN IMP_CONCEPTO ELSE 0 END) AS IMP_IVA_INTERES_EXTRA_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'PAGOTARD' THEN IMP_CONCEPTO ELSE 0 END) AS IMP_PAGO_TARDIO_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'INTMORA'  THEN IMP_CONCEPTO ELSE 0 END) AS IMP_INTERES_MORA_PAGADO,
+               SUM(CASE WHEN B.CVE_CONCEPTO = 'IVAINTMO' THEN IMP_CONCEPTO ELSE 0 END) AS IMP_IVA_INTERES_MORA_PAGADO
+          INTO vlIdPrestamo, vlNumAmortizacion, vlFValor, vlCapitalPagado, vlInteresPagado, vlIVAInteresPag, 
+               vlInteresExtPag, vlIVAIntExtPag, vlImpPagoTardio, vlImpIntMora, vlImpIVAIntMora
+          FROM PFIN_MOVIMIENTO A, PFIN_MOVIMIENTO_DET B
+         WHERE A.CVE_GPO_EMPRESA = pCveGpoEmpresa     AND
+               A.CVE_EMPRESA     = pCveEmpresa        AND
+               A.ID_MOVIMIENTO   = pIdMovimiento      AND
+               A.CVE_GPO_EMPRESA = B.CVE_GPO_EMPRESA  AND
+               A.CVE_EMPRESA     = B.CVE_EMPRESA      AND
+               A.ID_MOVIMIENTO   = B.ID_MOVIMIENTO 
+         GROUP BY A.ID_PRESTAMO, A.NUM_PAGO_AMORTIZACION, A.F_APLICACION;
+
+        -- Actualiza la informacion de la tabla de amortizacion
+        UPDATE SIM_TABLA_AMORTIZACION 
+           SET IMP_CAPITAL_AMORT_PAGADO     = NVL(IMP_CAPITAL_AMORT_PAGADO,0)      + NVL(vlCapitalPagado,0),
+               IMP_INTERES_PAGADO           = NVL(IMP_INTERES_PAGADO,0)            + NVL(vlInteresPagado,0),
+               IMP_IVA_INTERES_PAGADO       = NVL(IMP_IVA_INTERES_PAGADO,0)        + NVL(vlIVAInteresPag,0),
+               IMP_INTERES_EXTRA_PAGADO     = NVL(IMP_INTERES_EXTRA_PAGADO,0)      + NVL(vlInteresExtPag,0),
+               IMP_IVA_INTERES_EXTRA_PAGADO = NVL(IMP_IVA_INTERES_EXTRA_PAGADO,0)  + NVL(vlIVAIntExtPag,0),
+               IMP_PAGO_TARDIO_PAGADO       = NVL(IMP_PAGO_TARDIO_PAGADO,0)        + NVL(vlImpPagoTardio,0),
+               IMP_INTERES_MORA_PAGADO      = NVL(IMP_INTERES_MORA_PAGADO,0)       + NVL(vlImpIntMora,0),
+               IMP_IVA_INTERES_MORA_PAGADO  = NVL(IMP_IVA_INTERES_MORA_PAGADO,0)   + NVL(vlImpIVAIntMora,0),
+               FECHA_AMORT_PAGO_ULTIMO      = vlFValor
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa
+           AND CVE_EMPRESA           = pCveEmpresa
+           AND ID_PRESTAMO           = vlIdPrestamo
+           AND NUM_PAGO_AMORTIZACION = vlNumAmortizacion;
+    
+        -- Actualiza la informacion de los accesorios pagados
+        FOR vlBufConceptoPagado IN curConceptoPagado LOOP
+            UPDATE SIM_TABLA_AMORT_ACCESORIO
+               SET IMP_ACCESORIO_PAGADO  = NVL(IMP_ACCESORIO_PAGADO,0) + vlBufConceptoPagado.IMP_CONCEPTO
+             WHERE CVE_GPO_EMPRESA       = vlBufConceptoPagado.CVE_GPO_EMPRESA       AND
+                   CVE_EMPRESA           = vlBufConceptoPagado.CVE_EMPRESA           AND
+                   ID_PRESTAMO           = vlBufConceptoPagado.ID_PRESTAMO           AND
+                   NUM_PAGO_AMORTIZACION = vlBufConceptoPagado.NUM_PAGO_AMORTIZACION AND
+                   ID_ACCESORIO          = vlBufConceptoPagado.ID_ACCESORIO;
+        END LOOP;
+        
+                -- Recupera el saldo de la amortizacion
+        SELECT SUM(IMP_NETO)
+          INTO vlImpDeuda
+          FROM V_SIM_TABLA_AMORT_CONCEPTO 
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+               CVE_EMPRESA           = pCveEmpresa    AND
+               ID_PRESTAMO           = vlIdPrestamo   AND
+               NUM_PAGO_AMORTIZACION = vlNumAmortizacion;
+        
+        -- Verifica si se liquido el pago total del credito
+        IF ABS(vlImpDeuda) > .05 THEN 
+           vlBPagado := cFalso;
+        ELSE 
+           vlBPagado := cVerdadero ;
+        END IF;
+        
+        -- Actualiza la informacion de pago puntual y pago completo en la tabla de amortizacion 
+        UPDATE SIM_TABLA_AMORTIZACION 
+           SET B_PAGO_PUNTUAL        = CASE WHEN FECHA_AMORTIZACION >= vlFValor AND vlBPagado = cVerdadero THEN cVerdadero
+                                            ELSE cFalso
+                                       END,
+               B_PAGADO              = vlBPagado
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa
+           AND CVE_EMPRESA           = pCveEmpresa
+           AND ID_PRESTAMO           = vlIdPrestamo
+           AND NUM_PAGO_AMORTIZACION = vlNumAmortizacion;
+
+    END pActualizaTablaAmortizacion;
+
+    PROCEDURE pGeneraTablaAmortizacion(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                       pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                       pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                                       pTxRespuesta     OUT VARCHAR2)
+    IS
+    vlIdCliente         SIM_PRESTAMO.ID_CLIENTE%TYPE;
+    vlIdGrupo           SIM_PRESTAMO.ID_GRUPO%TYPE;
+    vlIdSucursal        SIM_PRODUCTO_SUCURSAL.ID_SUCURSAL%TYPE;
+    vlTasaIVA           SIM_CAT_SUCURSAL.TASA_IVA%TYPE;
+    vlCveMetodo         SIM_PRESTAMO.CVE_METODO%TYPE;
+    vlPlazo             SIM_PRESTAMO.PLAZO%TYPE;
+    vlFInicioEntrega    SIM_PRESTAMO.FECHA_ENTREGA%TYPE;
+    vlMontoInicial      SIM_CLIENTE_MONTO.MONTO_AUTORIZADO%TYPE;
+    vlTasaInteres       SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+    vlFReal             SIM_PRESTAMO.FECHA_REAL%TYPE;
+    vlFEntrega          SIM_PRESTAMO.FECHA_ENTREGA%TYPE;
+    vlIdPeriodicidad    SIM_PRESTAMO.ID_PERIODICIDAD_PRODUCTO%TYPE;
+    vlDiasPeriodicidad  SIM_CAT_PERIODICIDAD.DIAS%TYPE;
+    vlFechaAmort        SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
+    vlNumPagos          NUMBER;
+    i                   NUMBER(10):= 0;
+    V                   SIM_TABLA_AMORTIZACION%ROWTYPE;
+
+    CURSOR curAccesorios IS
+   	
+   	    -- Cursor que obtiene los accesorios que tiene relacionados el préstamo
+        SELECT C.ID_CARGO_COMISION, C.ID_FORMA_APLICACION, C.VALOR VALOR_CARGO, U.VALOR VALOR_UNIDAD, 
+               PC.DIAS DIAS_CARGO, PP.DIAS DIAS_PRODUCTO, CA.TASA_IVA 
+          FROM SIM_PRESTAMO P, SIM_PRESTAMO_CARGO_COMISION C, SIM_CAT_ACCESORIO CA, SIM_CAT_PERIODICIDAD PC, 
+               SIM_CAT_PERIODICIDAD PP, SIM_CAT_UNIDAD U
+          WHERE P.CVE_GPO_EMPRESA 	         = pCveGpoEmpresa
+            AND P.CVE_EMPRESA     	         = pCveEmpresa
+            AND P.ID_PRESTAMO     	         = pIdPrestamo
+            AND P.CVE_GPO_EMPRESA 	         = C.CVE_GPO_EMPRESA
+            AND P.CVE_EMPRESA     	         = C.CVE_EMPRESA
+            AND P.ID_PRESTAMO     	         = C.ID_PRESTAMO
+            AND C.CVE_GPO_EMPRESA 	         = CA.CVE_GPO_EMPRESA
+            AND C.CVE_EMPRESA     	         = CA.CVE_EMPRESA
+            AND C.ID_CARGO_COMISION          = CA.ID_ACCESORIO
+            AND CA.CVE_TIPO_ACCESORIO        = 'CARGO_COMISION'
+            AND C.CVE_GPO_EMPRESA 	         = U.CVE_GPO_EMPRESA(+)
+            AND C.CVE_EMPRESA     	         = U.CVE_EMPRESA(+)
+            AND C.ID_UNIDAD                  = U.ID_UNIDAD(+)
+            AND C.CVE_GPO_EMPRESA 	         = PC.CVE_GPO_EMPRESA(+)
+            AND C.CVE_EMPRESA     	         = PC.CVE_EMPRESA(+)
+            AND C.ID_PERIODICIDAD            = PC.ID_PERIODICIDAD(+)
+            AND P.CVE_GPO_EMPRESA 	         = PP.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	         = PP.CVE_EMPRESA(+)
+            AND P.ID_PERIODICIDAD_PRODUCTO   = PP.ID_PERIODICIDAD(+)
+            AND C.ID_FORMA_APLICACION          NOT IN (1,2);
+    BEGIN
+        -- Inicializa datos del buffer con los parametros del procedimiento
+        V.CVE_GPO_EMPRESA   := pCveGpoEmpresa;
+        V.CVE_EMPRESA       := pCveEmpresa;
+        V.ID_PRESTAMO       := pIdPrestamo;
+        
+        BEGIN
+            -- Revisa que no exista ningun movimiento de pago de prestamo para este prestamo, en caso de existir
+            -- No vuelve a generar la tabla de amortizacion
+            BEGIN
+              SELECT COUNT(1)
+                INTO vlNumPagos
+                FROM PFIN_MOVIMIENTO
+               WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa AND
+                     CVE_EMPRESA     = pCveEmpresa    AND
+                     ID_PRESTAMO     = pIdPrestamo    AND
+                     CVE_OPERACION   = cPagoPrestamo  AND
+                     SIT_MOVIMIENTO  <> cSitCancelada;
+              
+              EXCEPTION WHEN NO_DATA_FOUND THEN vlNumPagos := 0;
+            END;
+                   
+            IF vlNumPagos > 0 THEN
+               pTxRespuesta := 'No se actualiza la tabla de amortizacion por que ya existen pagos para este prestamo';
+               RETURN;
+            END IF;
+
+            -- Se obtienen los datos genéricos del préstamo
+            SELECT P.ID_CLIENTE, P.ID_GRUPO, P.FECHA_ENTREGA, P.CVE_METODO, S.ID_SUCURSAL, C.TASA_IVA,
+            		   P.PLAZO, NVL(P.FECHA_REAL, P.FECHA_ENTREGA) FECHA_REAL, P.ID_PERIODICIDAD_PRODUCTO, P.FECHA_ENTREGA, PP.DIAS
+              INTO vlIdCliente, vlIdGrupo, vlFInicioEntrega, vlCveMetodo, vlIdSucursal, vlTasaIVA, 
+                   vlPlazo, vlFReal, vlIdPeriodicidad, vlFEntrega, vlDiasPeriodicidad
+              FROM SIM_PRESTAMO P, SIM_PRODUCTO_SUCURSAL S, SIM_CAT_SUCURSAL C, SIM_CAT_PERIODICIDAD PP
+             WHERE P.CVE_GPO_EMPRESA 	         = pCveGpoEmpresa
+               AND P.CVE_EMPRESA     	         = pCveEmpresa
+               AND P.ID_PRESTAMO     	         = pIdPrestamo
+               AND P.CVE_GPO_EMPRESA	         = S.CVE_GPO_EMPRESA
+               AND P.CVE_EMPRESA    	         = S.CVE_EMPRESA
+        		   AND P.ID_PRODUCTO		           = S.ID_PRODUCTO
+        		   AND P.ID_SUCURSAL               = S.ID_SUCURSAL        -- verificar la relación de estas tablas
+        		   AND S.CVE_GPO_EMPRESA	         = C.CVE_GPO_EMPRESA
+               AND S.CVE_EMPRESA    	         = C.CVE_EMPRESA
+               AND S.ID_SUCURSAL 		           = C.ID_SUCURSAL
+               AND P.CVE_GPO_EMPRESA 	         = PP.CVE_GPO_EMPRESA(+)
+               AND P.CVE_EMPRESA     	         = PP.CVE_EMPRESA(+)
+               AND P.ID_PERIODICIDAD_PRODUCTO  = PP.ID_PERIODICIDAD(+);
+        		
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    pTxRespuesta := 'No se encontró el préstamo en su relación con producto_sucursal con las siguientes caraterísticas: '||CHR(10)||
+                        ' Grupo Empresa: '||pCveGpoEmpresa||CHR(10)||
+                        ' Empresa:       '||pCveEmpresa||CHR(10)||
+                        ' Préstamo:      '||pIdPrestamo;
+                    RETURN;
+                WHEN TOO_MANY_ROWS THEN
+                    pTxRespuesta := 'Al solicitar los datos genéricos del préstamo se obtienen demasiados registros';
+                    RETURN;
+        END;
+
+        -- Valida que la fecha real de entrega del prestamo no sea nulo
+        IF vlFReal IS NULL THEN
+           pTxRespuesta := 'La fecha real de la entrega del prestamo no puede ser nulo';
+           RETURN;
+        END IF;
+
+        V.TASA_INTERES  := DameTasaAmort(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, vlTasaIVA, pTxRespuesta);
+
+        IF pTxRespuesta IS NOT NULL THEN
+            pTxRespuesta := 'Error al calcular la tasa de interés del préstamo, verifique : '||pTxRespuesta;
+            RETURN;
+        END IF;
+
+        -- se borra la tabla de accesorios de amortización
+        DELETE SIM_TABLA_AMORT_ACCESORIO
+         WHERE CVE_GPO_EMPRESA 	= pCveGpoEmpresa
+           AND CVE_EMPRESA     	= pCveEmpresa
+           AND ID_PRESTAMO     	= pIdPrestamo;
+
+        -- se borra la tabla de amortización
+        DELETE SIM_TABLA_AMORTIZACION
+         WHERE CVE_GPO_EMPRESA 	= pCveGpoEmpresa
+           AND CVE_EMPRESA     	= pCveEmpresa
+           AND ID_PRESTAMO     	= pIdPrestamo;
+           
+        -- Inicializa variables
+        V.B_PAGO_PUNTUAL                := cFalso;
+        V.IMP_INTERES_PAGADO            := 0;
+        V.IMP_INTERES_EXTRA_PAGADO      := 0;
+        V.IMP_CAPITAL_AMORT_PAGADO      := 0;
+        V.IMP_PAGO_PAGADO               := 0;
+        V.IMP_IVA_INTERES_PAGADO        := 0;
+        V.IMP_IVA_INTERES_EXTRA_PAGADO  := 0;
+        V.B_PAGADO                      := cFalso;
+        V.FECHA_AMORT_PAGO_ULTIMO       := NULL; 
+           
+        WHILE i < vlPlazo LOOP
+            BEGIN
+                -- Se incrementa el contador
+                i := i + 1;
+                V.NUM_PAGO_AMORTIZACION := i;
+
+                IF i = 1 THEN
+                    -- Se obtiene el monto inicial la primera vez
+                    V.IMP_SALDO_INICIAL := ROUND( DameMontoAutorizado(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, vlIdCliente, pTxRespuesta) +
+                                                  DameCargoInicial(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, pTxRespuesta), 10);
+
+                    IF pTxRespuesta IS NOT NULL THEN
+                        pTxRespuesta := 'Error al calcular el saldo inicial del préstamo: '||pTxRespuesta;
+                        ROLLBACK;
+                        RETURN;
+                    END IF;
+
+                    -- si la periodicidad es Catorcenal o Semanal y la fecha de entrega es diferente a la 
+                    -- real se calculan intereses extra
+                    IF vlIdPeriodicidad IN (7,8) AND vlFEntrega <> vlFReal THEN
+
+                        IF vlCveMetodo NOT IN ('05','06') THEN
+                            --  Se calcula el importe de interés extra y el iva del mismo
+                            V.IMP_INTERES_EXTRA := DameInteresExtra(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, V.IMP_SALDO_INICIAL,
+                                                                    vlTasaIVA, pTxRespuesta) / (1 + vlTasaIVA/100);
+                                                                    
+                            V.IMP_IVA_INTERES_EXTRA := ROUND(V.IMP_INTERES_EXTRA * (vlTasaIVA / 100), 10);
+
+                            -- Verifica que no haya habido error
+                            IF pTxRespuesta IS NOT NULL THEN
+                                pTxRespuesta := 'Error al calcular el interés extra: '||pTxRespuesta;
+                                ROLLBACK;
+                                RETURN;
+                            END IF;
+
+                        ELSE
+                            -- Si no se trata de los métodos anteriores
+                            V.IMP_SALDO_INICIAL := ROUND(V.IMP_SALDO_INICIAL + 
+                                                        (DameInteresExtra(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, V.IMP_SALDO_INICIAL,
+                                                                          vlTasaIVA,pTxRespuesta) * vlPlazo), 10);
+
+                            IF pTxRespuesta IS NOT NULL THEN
+                                pTxRespuesta := 'Error al calcular el interés extra: '||pTxRespuesta;
+                                ROLLBACK;
+                                RETURN;
+                            END IF;
+
+                            V.IMP_INTERES_EXTRA := 0;
+                        END IF;
+
+                    ELSE
+                        V.IMP_INTERES_EXTRA := 0;
+                    END IF;
+
+                    -- Se guarda el monto para cálculos posteriores
+                    vlMontoInicial                 := V.IMP_SALDO_INICIAL;
+                    V.IMP_CAPITAL_AMORT            := ROUND(V.IMP_SALDO_INICIAL / vlPlazo, 10);
+                    V.IMP_INTERES                  := ROUND(V.IMP_SALDO_INICIAL * V.TASA_INTERES / (1+vlTasaIVA / 100), 10);
+                    V.IMP_IVA_INTERES              := ROUND(V.IMP_INTERES * (vlTasaIVA / 100), 10);
+                    V.IMP_SALDO_FINAL              := ROUND(V.IMP_SALDO_INICIAL - V.IMP_CAPITAL_AMORT, 10);
+                    V.FECHA_AMORTIZACION           := vlFReal;
+                    vlFechaAmort                   := vlFReal;
+                ELSE
+                    V.IMP_SALDO_INICIAL     := V.IMP_SALDO_FINAL;
+                    V.IMP_SALDO_FINAL       := ROUND(V.IMP_SALDO_INICIAL - V.IMP_CAPITAL_AMORT,10);
+                    
+                    IF vlCveMetodo <> '01' THEN
+                        V.IMP_INTERES       := ROUND(V.IMP_SALDO_INICIAL * V.TASA_INTERES / (1 + vlTasaIVA / 100), 10);
+                        V.IMP_IVA_INTERES   := ROUND(V.IMP_INTERES * (vlTasaIVA / 100), 10);
+                    END IF;
+
+                END IF;
+
+                -- Se calcula la fecha de amortización
+                vlFechaAmort                := vlFechaAmort + vlDiasPeriodicidad;
+                V.FECHA_AMORTIZACION        := DameFechaValida(pCveGpoEmpresa, pCveEmpresa, vlFechaAmort, 'MX', pTxRespuesta);
+
+                IF pTxRespuesta IS NOT NULL THEN
+                    pTxRespuesta := 'Error al calcular la fecha de amortización: '||pTxRespuesta;
+                    ROLLBACK;
+                    RETURN;
+                END IF;
+                            
+                -- Cálculo del monto a pagar
+                IF vlCveMetodo IN ('05','06') THEN
+                    V.IMP_PAGO              := ROUND((NVL(V.IMP_SALDO_INICIAL, 0) * NVL(V.TASA_INTERES, 0)) /
+                                                     (1 - (1 / POWER(1 + NVL(V.TASA_INTERES, 0), (vlPlazo - i + 1) ) ) ), 10);
+                    V.IMP_CAPITAL_AMORT     := ROUND(V.IMP_PAGO - (NVL(V.IMP_INTERES, 0) + NVL(V.IMP_IVA_INTERES, 0) ), 10);
+                    V.IMP_SALDO_FINAL       := ROUND(V.IMP_SALDO_INICIAL - V.IMP_CAPITAL_AMORT, 10);
+                ELSE
+                    V.IMP_PAGO              := ROUND(NVL(V.IMP_INTERES, 0) + NVL(V.IMP_IVA_INTERES, 0) + NVL(V.IMP_INTERES_EXTRA, 0) + 
+                                                     NVL(V.IMP_IVA_INTERES_EXTRA, 0) + NVL(V.IMP_CAPITAL_AMORT, 0), 10)  ;
+                END IF;
+
+                -- Inicializa variables
+                V.B_PAGO_PUNTUAL                := cFalso;
+                V.IMP_INTERES_PAGADO            := 0;
+                V.IMP_INTERES_EXTRA_PAGADO      := 0;
+                V.IMP_CAPITAL_AMORT_PAGADO      := 0;
+                V.IMP_PAGO_PAGADO               := 0;
+                V.IMP_IVA_INTERES_PAGADO        := 0;
+                V.IMP_IVA_INTERES_EXTRA_PAGADO  := 0;
+                V.B_PAGADO                      := cFalso;
+                V.FECHA_AMORT_PAGO_ULTIMO       := NULL; 
+                V.IMP_PAGO_TARDIO               := 0;
+                V.IMP_PAGO_TARDIO_PAGADO        := 0;
+                V.IMP_INTERES_MORA              := 0;
+                V.IMP_INTERES_MORA_PAGADO       := 0;
+                V.IMP_IVA_INTERES_MORA          := 0;
+                V.IMP_IVA_INTERES_MORA_PAGADO   := 0;
+                V.F_VALOR_CALCULO               := NULL;
+                
+                -- Actualiza el importe de interes devengado por dia, no incluye el interes e IVA extra ya que solo 
+                -- considera el de la periodicidad estandar
+                V.IMP_INTERES_DEV_X_DIA         := (V.IMP_INTERES + V.IMP_IVA_INTERES) / vlDiasPeriodicidad;
+
+                -- Se inserta el registro
+                INSERT INTO SIM_TABLA_AMORTIZACION VALUES V;
+
+            EXCEPTION
+                WHEN OTHERS THEN
+                    pTxrespuesta := 'Error al generar la tabla: '||SQLERRM;
+                    ROLLBACK;
+                    RETURN;
+            END;
+        END LOOP;
+
+        -- Se itera para generar los accesorios
+        FOR vlBufAccesorios IN curAccesorios LOOP
+        
+            BEGIN
+                -- Se calcula el importe del accesorio
+                INSERT INTO SIM_TABLA_AMORT_ACCESORIO(CVE_GPO_EMPRESA, CVE_EMPRESA, ID_PRESTAMO, NUM_PAGO_AMORTIZACION, ID_ACCESORIO,
+                                                      ID_FORMA_APLICACION, IMP_ACCESORIO, IMP_IVA_ACCESORIO, IMP_ACCESORIO_PAGADO, IMP_IVA_ACCESORIO_PAGADO)
+                SELECT CVE_GPO_EMPRESA, CVE_EMPRESA, ID_PRESTAMO, NUM_PAGO_AMORTIZACION, vlBufAccesorios.ID_CARGO_COMISION, 
+                       vlBufAccesorios.ID_FORMA_APLICACION,
+                       ROUND(
+                            DECODE(vlBufAccesorios.ID_FORMA_APLICACION,3, vlMontoInicial,5,1,4,IMP_SALDO_INICIAL) *
+                            vlBufAccesorios.VALOR_CARGO /
+                            DECODE(vlBufAccesorios.ID_FORMA_APLICACION,3,vlBufAccesorios.VALOR_UNIDAD,5,1,4,
+                            vlBufAccesorios.VALOR_UNIDAD) /
+                            vlBufAccesorios.DIAS_CARGO * vlBufAccesorios.DIAS_PRODUCTO
+                       ,10) AS IMP_ACCESORIO, 
+                       ROUND(
+                            DECODE(vlBufAccesorios.ID_FORMA_APLICACION,3, vlMontoInicial,5,1,4,IMP_SALDO_INICIAL) *
+                            vlBufAccesorios.VALOR_CARGO /
+                            DECODE(vlBufAccesorios.ID_FORMA_APLICACION,3,vlBufAccesorios.VALOR_UNIDAD,5,1,4,
+                            vlBufAccesorios.VALOR_UNIDAD) /
+                            vlBufAccesorios.DIAS_CARGO * vlBufAccesorios.DIAS_PRODUCTO
+                       ,10) * (NVL(vlBufAccesorios.TASA_IVA,1) - 1) AS IMP_IVA_ACCESORIO, 0, 0
+                  FROM SIM_TABLA_AMORTIZACION
+                 WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+                   AND CVE_EMPRESA     = pCveEmpresa
+                   AND ID_PRESTAMO     = pIdPrestamo;
+                    
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        pTxrespuesta := 'Error al calcular los accesorios: '||SQLERRM;
+                        ROLLBACK;
+                        RETURN;
+            END;
+
+        END LOOP;
+
+        pTxrespuesta := 'La tabla de amortización del préstamo '||pIdPrestamo||' se generó correctamente.';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            pTxrespuesta := 'Error global al calcular la tabla de amortización del préstamo '||pIdPrestamo||' '||SQLERRM;
+            RETURN;
+    END pGeneraTablaAmortizacion;
+
+    PROCEDURE pAplicaPagoCredito(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                 pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                 pCveUsuario      IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                 pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                 pTxrespuesta     OUT VARCHAR2)
+    IS
+        vlImpSaldo             PFIN_SALDO.SDO_EFECTIVO%TYPE;
+        vlIdCuenta             SIM_PRESTAMO.ID_CUENTA%TYPE;
+        vlImpNeto              PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE;
+        vlMovtosPosteriores    NUMBER;
+        vlResultado            NUMBER;
+        
+        CURSOR curAmortizacionesPendientes IS
+          SELECT NUM_PAGO_AMORTIZACION
+            FROM SIM_TABLA_AMORTIZACION
+           WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+                 CVE_EMPRESA           = pCveEmpresa    AND
+                 ID_PRESTAMO           = pIdPrestamo    AND
+                 NVL(B_PAGADO, cFalso) = cFalso
+           ORDER BY NUM_PAGO_AMORTIZACION;
+    BEGIN
+    
+        BEGIN 
+            -- Se asigna la fecha del sistema a la variable global
+            AsignaFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+            
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    pTxrespuesta := 'No se encuentra la fecha del sistema ';
+                    RETURN;
+        END;        
+        
+        DBMS_OUTPUT.PUT_LINE('Paso fecha = ' || vgFechaSistema);
+        
+        BEGIN -- Se obtiene el id de la cuenta asociada al credito
+            SELECT ID_CUENTA_REFERENCIA
+              INTO vlIdCuenta
+              FROM SIM_PRESTAMO
+             WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+               AND CVE_EMPRESA     = pCveEmpresa
+               AND ID_PRESTAMO     = pIdPrestamo;
+        
+            EXCEPTION   
+                WHEN NO_DATA_FOUND THEN
+                    pTxrespuesta := 'No existe el préstamo';
+                    RETURN;
+        END;
+ 
+        DBMS_OUTPUT.PUT_LINE('Paso recuperacion de cuenta: ' || vlIdCuenta);
+ 
+        -- Valida que la fecha valor no sea menor a un pago previo
+        BEGIN
+          SELECT COUNT(1)
+            INTO vlMovtosPosteriores
+            FROM PFIN_MOVIMIENTO
+           WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+             AND CVE_EMPRESA     = pCveEmpresa
+             AND ID_PRESTAMO     = pIdPrestamo
+             AND NVL(F_APLICACION,F_LIQUIDACION) > pFValor;
+             
+          EXCEPTION 
+              WHEN NO_DATA_FOUND THEN vlMovtosPosteriores := 0;
+        END;
+
+        IF vlMovtosPosteriores > 0 THEN
+           pTxrespuesta := 'Existen movimientos con fecha valor posterior a este movimiento';
+           RETURN;
+        END IF;
+
+        DBMS_OUTPUT.PUT_LINE('Paso recuperacion de movtos posteriores: ' || vlMovtosPosteriores);
+        
+       -- Ejecuta el pago de cada amortizacion mientras exista una amortizacion pendiente de pagar y el cliente 
+       -- tenga saldo en su cuenta
+       FOR vlBufAmortizaciones IN curAmortizacionesPendientes LOOP
+           BEGIN -- Se obtiene el importe de saldo del cliente
+               SELECT SDO_EFECTIVO
+                 INTO vlImpSaldo
+                 FROM PFIN_SALDO
+                WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+                  AND CVE_EMPRESA     = pCveEmpresa
+                  AND F_FOTO          = vgFechaSistema
+                  AND ID_CUENTA       = vlIdCuenta
+                  AND CVE_DIVISA      = cDivisaPeso;
+                
+               EXCEPTION
+                   WHEN NO_DATA_FOUND THEN
+                       vlImpSaldo := 0;
+           END;
+
+           DBMS_OUTPUT.PUT_LINE('Recupero saldo: ' || vlImpSaldo);
+           
+           IF vlImpSaldo > 0 THEN
+             vlResultado := pAplicaPagoCreditoPorAmort(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, vlBufAmortizaciones.NUM_PAGO_AMORTIZACION, 
+                                                       vlImpSaldo, vlIdCuenta, pCveUsuario, pFValor, pTxrespuesta);
+
+             DBMS_OUTPUT.PUT_LINE('Aplico pago a la amortizacion: ' || vlBufAmortizaciones.NUM_PAGO_AMORTIZACION);             
+           ELSE
+              EXIT;
+           END IF;
+
+       END LOOP;
+       
+       DBMS_OUTPUT.PUT_LINE('Fin pAplicaPagoCredito');             
+
+    END pAplicaPagoCredito;
+    
+    -- Funcion que actuliza la informacion variable de los creditos, esto lo realiza para todas las amortizaciones
+    -- pendientes de pago
+    --      Por atraso: Pago tardio, interes moratorio e IVA de interes moratorio asi como la F_VALOR_CALCULO
+    --      Intereses devengados: Interes devengado del dia e interes devengado acumulado en el mes
+    -- Esto lo realiza para el prestamo enviado como parametro, en caso de que el prestamo sea igual a cero,
+    -- realiza el calculo para todos los creditos
+    FUNCTION fActualizaInformacionCredito(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                          pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                          pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER
+    IS
+       vlBEsGrupo                    SIM_TABLA_AMORTIZACION.B_PAGADO%TYPE;
+       vlInteresMora                 SIM_TABLA_AMORTIZACION.IMP_INTERES%TYPE;
+       vlIVAInteresMora              SIM_TABLA_AMORTIZACION.IMP_INTERES%TYPE;
+              
+       CURSOR curPorPrestamo IS
+           SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
+                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+             FROM SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
+            WHERE T.CVE_GPO_EMPRESA       = pCveGpoEmpresa
+              AND T.CVE_EMPRESA           = pCveEmpresa
+              AND T.ID_PRESTAMO           = pIdPrestamo
+              AND T.FECHA_AMORTIZACION    < pFValor
+              AND T.B_PAGADO              = cFalso
+              AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
+              AND T.CVE_EMPRESA           = P.CVE_EMPRESA
+              AND T.ID_PRESTAMO           = P.ID_PRESTAMO
+              AND P.ID_TIPO_RECARGO    IN (4,5)
+              AND NVL(P.MONTO_FIJO_PERIODO,0) > 0;
+
+       CURSOR curPorGpoPrestamo IS
+           SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
+                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+             FROM SIM_PRESTAMO_GPO_DET G, SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
+            WHERE G.CVE_GPO_EMPRESA       = pCveGpoEmpresa
+              AND G.CVE_EMPRESA           = pCveEmpresa
+              AND G.ID_PRESTAMO_GRUPO     = pIdPrestamo
+              AND G.CVE_GPO_EMPRESA       = T.CVE_GPO_EMPRESA
+              AND G.CVE_EMPRESA           = T.CVE_EMPRESA
+              AND G.ID_PRESTAMO           = T.ID_PRESTAMO
+              AND T.FECHA_AMORTIZACION    < pFValor
+              AND T.B_PAGADO              = cFalso
+              AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
+              AND T.CVE_EMPRESA           = P.CVE_EMPRESA
+              AND T.ID_PRESTAMO           = P.ID_PRESTAMO
+              AND P.ID_TIPO_RECARGO    IN (4,5)
+              AND NVL(P.MONTO_FIJO_PERIODO,0) > 0;
+
+       CURSOR curTodo IS
+           SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
+                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+             FROM SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
+            WHERE T.CVE_GPO_EMPRESA       = pCveGpoEmpresa
+              AND T.CVE_EMPRESA           = pCveEmpresa
+              AND T.FECHA_AMORTIZACION    < pFValor
+              AND T.B_PAGADO              = cFalso
+              AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
+              AND T.CVE_EMPRESA           = P.CVE_EMPRESA
+              AND T.ID_PRESTAMO           = P.ID_PRESTAMO
+              AND P.ID_TIPO_RECARGO    IN (4,5)
+              AND NVL(P.MONTO_FIJO_PERIODO,0) > 0;
+    BEGIN
+       -- Determina si el prestamo es un prestamo grupal
+       IF pIdPrestamo <> 0 THEN
+       BEGIN
+          SELECT cVerdadero
+            INTO vlBEsGrupo
+            FROM SIM_PRESTAMO_GRUPO
+           WHERE CVE_GPO_EMPRESA   = pCveGpoEmpresa
+             AND CVE_EMPRESA       = pCveEmpresa
+             AND ID_PRESTAMO_GRUPO = pIdPrestamo;
+             
+          EXCEPTION WHEN NO_DATA_FOUND THEN vlBEsGrupo := cFalso;
+             
+       END;      
+       END IF;
+       
+       -- Actualiza la informacion de acuerdo a las condiciones
+       CASE
+          -- Procesa todos los creditos
+          WHEN pIdPrestamo = 0 THEN
+               FOR vlBufAmorizacion IN curTodo LOOP
+                   pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
+                                         vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
+                                         
+                   UPDATE SIM_TABLA_AMORTIZACION
+                      SET IMP_PAGO_TARDIO      = vlBufAmorizacion.IMP_PAGO_TARDIO,
+                          IMP_INTERES_MORA     = vlInteresMora,
+                          IMP_IVA_INTERES_MORA = vlIVAInteresMora,
+                          F_VALOR_CALCULO      = pFValor
+                    WHERE CVE_GPO_EMPRESA       = vlBufAmorizacion.CVE_GPO_EMPRESA
+                      AND CVE_EMPRESA           = vlBufAmorizacion.CVE_EMPRESA
+                      AND ID_PRESTAMO           = vlBufAmorizacion.ID_PRESTAMO
+                      AND NUM_PAGO_AMORTIZACION = vlBufAmorizacion.NUM_PAGO_AMORTIZACION;
+               END LOOP;
+          -- Procesa un grupo
+          WHEN vlBEsGrupo = cVerdadero THEN
+               FOR vlBufAmorizacion IN curPorGpoPrestamo LOOP
+                   pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
+                                         vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
+                                         
+                   UPDATE SIM_TABLA_AMORTIZACION
+                      SET IMP_PAGO_TARDIO      = vlBufAmorizacion.IMP_PAGO_TARDIO,
+                          IMP_INTERES_MORA     = vlInteresMora,
+                          IMP_IVA_INTERES_MORA = vlIVAInteresMora,
+                          F_VALOR_CALCULO      = pFValor
+                    WHERE CVE_GPO_EMPRESA       = vlBufAmorizacion.CVE_GPO_EMPRESA
+                      AND CVE_EMPRESA           = vlBufAmorizacion.CVE_EMPRESA
+                      AND ID_PRESTAMO           = vlBufAmorizacion.ID_PRESTAMO
+                      AND NUM_PAGO_AMORTIZACION = vlBufAmorizacion.NUM_PAGO_AMORTIZACION;               
+               END LOOP;
+          
+          -- Procesa un credito individual
+          ELSE 
+               FOR vlBufAmorizacion IN curPorPrestamo LOOP
+                   pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
+                                         vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
+                                         
+                   UPDATE SIM_TABLA_AMORTIZACION
+                      SET IMP_PAGO_TARDIO      = vlBufAmorizacion.IMP_PAGO_TARDIO,
+                          IMP_INTERES_MORA     = vlInteresMora,
+                          IMP_IVA_INTERES_MORA = vlIVAInteresMora,
+                          F_VALOR_CALCULO      = pFValor
+                    WHERE CVE_GPO_EMPRESA       = vlBufAmorizacion.CVE_GPO_EMPRESA
+                      AND CVE_EMPRESA           = vlBufAmorizacion.CVE_EMPRESA
+                      AND ID_PRESTAMO           = vlBufAmorizacion.ID_PRESTAMO
+                      AND NUM_PAGO_AMORTIZACION = vlBufAmorizacion.NUM_PAGO_AMORTIZACION;               
+               END LOOP;
+       END CASE;
+        
+       RETURN 0;
+
+    END fActualizaInformacionCredito;
+
+    FUNCTION pAplicaPagoCreditoPorAmort(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                        pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                        pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                        pNumAmortizacion IN SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE,
+                                        pImportePago     IN PFIN_MOVIMIENTO.IMP_NETO%TYPE,
+                                        pIdCuenta        IN PFIN_MOVIMIENTO.ID_CUENTA%TYPE,
+                                        pCveUsuario      IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                        pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                        pTxrespuesta     OUT VARCHAR2)
+    RETURN NUMBER
+    IS
+        vlImpSaldo          PFIN_SALDO.SDO_EFECTIVO%TYPE;
+        vlIdCuentaRef       SIM_PRESTAMO.ID_CUENTA_REFERENCIA%TYPE;
+        vlImpNeto           PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE;
+        vlImpConcepto       PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE := 0;
+        vlIdPreMovto        PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE;
+        vlIdMovimiento      PFIN_PRE_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
+        vlValidaPagoPuntual SIM_TABLA_AMORTIZACION.CVE_GPO_EMPRESA%TYPE;
+        lbPagoCompleto      BOOLEAN;
+
+    -- Obtiene los conceptos del credito actualizados, los recupera de la tabla de amortizacion y de la de accesorios,
+    -- toma la informacion original y le resta lo realmente pagado       
+    CURSOR curDebe IS 
+         SELECT DECODE(A.CVE_CONCEPTO, 'CAPITA', D.ORDEN_CAPITAL, D.ORDEN_ACCESORIO)
+                * 100 + DECODE(A.CVE_CONCEPTO, 'CAPITA',0,B.ORDEN) AS ID_ORDEN, 
+                A.CVE_CONCEPTO, INITCAP(C.DESC_LARGA) DESCRIPCION, ABS(ROUND(SUM(A.IMP_NETO),2)) AS IMP_NETO
+           FROM V_SIM_TABLA_AMORT_CONCEPTO A, PFIN_CAT_CONCEPTO C, SIM_PRESTAMO P, SIM_CAT_FORMA_DISTRIBUCION D, SIM_PRESTAMO_ACCESORIO B
+          WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa
+            AND A.CVE_EMPRESA           = pCveEmpresa
+            AND A.ID_PRESTAMO           = pIdPrestamo
+            AND A.NUM_PAGO_AMORTIZACION = pNumAmortizacion
+            AND A.IMP_NETO              <> 0
+            AND A.CVE_GPO_EMPRESA       = C.CVE_GPO_EMPRESA
+            AND A.CVE_EMPRESA           = C.CVE_EMPRESA
+            AND A.CVE_CONCEPTO          = C.CVE_CONCEPTO
+            AND A.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
+            AND A.CVE_EMPRESA           = P.CVE_EMPRESA
+            AND A.ID_PRESTAMO           = P.ID_PRESTAMO
+            AND P.CVE_GPO_EMPRESA       = D.CVE_GPO_EMPRESA
+            AND P.CVE_EMPRESA           = D.CVE_EMPRESA
+            AND P.ID_FORMA_DISTRIBUCION = D.ID_FORMA_DISTRIBUCION
+            AND A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA(+)
+            AND A.CVE_EMPRESA           = B.CVE_EMPRESA(+)
+            AND A.ID_PRESTAMO           = B.ID_PRESTAMO(+)
+            AND A.ID_ACCESORIO          = B.ID_ACCESORIO(+)
+        GROUP BY DECODE(A.CVE_CONCEPTO, 'CAPITA', D.ORDEN_CAPITAL, D.ORDEN_ACCESORIO)
+                 * 100 + DECODE(A.CVE_CONCEPTO, 'CAPITA',0,B.ORDEN), A.CVE_CONCEPTO, INITCAP(C.DESC_LARGA)
+        HAVING ROUND(SUM(IMP_NETO),2) < 0
+        ORDER BY DECODE(A.CVE_CONCEPTO, 'CAPITA', D.ORDEN_CAPITAL, D.ORDEN_ACCESORIO)
+                 * 100 + DECODE(A.CVE_CONCEPTO, 'CAPITA', 0, B.ORDEN);
+    --******************************************************************************************
+    -- Inicia la logica del bloque principal
+    --******************************************************************************************
+    BEGIN       
+        -- Inicializa variables
+        vlImpSaldo      := pImportePago;
+        vlImpNeto       := 0;
+        lbPagoCompleto  := FALSE;
+        
+        -- Se obtiene el id del premovimiento
+        SELECT  SQ01_PFIN_PRE_MOVIMIENTO.NEXTVAL INTO vlIdPreMovto FROM DUAL;
+
+        -- Se genera el premovimiento
+        PKG_PROCESOS.pGeneraPreMovto(pCveGpoEmpresa, pCveEmpresa, vlIdPreMovto, vgFechaSistema, pIdCuenta, pIdPrestamo,
+                                     cDivisaPeso, cPagoPrestamo, vlImpNeto, 'PRESTAMO', 'PRESTAMO', 'Pago de préstamo',
+                                     NULL, pCveUsuario, pFValor, pNumAmortizacion, pTxrespuesta);            
+
+        IF pTxrespuesta IS NOT NULL THEN 
+           RETURN 1; 
+        END IF;
+            
+        FOR vlBufDebe IN curDebe LOOP
+            
+            IF vlImpSaldo > 0 THEN
+               -- Realiza la validación para identificar si liquida el total del pago
+               -- Si el saldo es mayor al importe del concepto, cubre todo el concepto, de lo contrario solo lo que le alcanza
+               IF vlBufDebe.IMP_NETO > vlImpSaldo THEN 
+                  -- Si ya no tiene saldo para el pago del concepto no paga completo
+                  lbPagoCompleto := FALSE;
+                  vlImpConcepto  := vlImpSaldo;
+               ELSE
+                  vlImpConcepto   := vlBufDebe.IMP_NETO;
+                  lbPagoCompleto  := TRUE;
+               END IF;
+            
+               PKG_PROCESOS.pGeneraPreMovtoDet(pCveGpoEmpresa, pCveEmpresa, vlIdPreMovto, vlBufDebe.CVE_CONCEPTO, vlImpConcepto, vlBufDebe.DESCRIPCION, pTxrespuesta);
+
+               -- Se realiza actualiza el importe neto y el saldo del cliente
+               vlImpNeto   := vlImpNeto  + vlImpConcepto;
+               vlImpSaldo  := vlImpSaldo - vlImpConcepto;
+                    
+               dbms_output.put_line(vlBufDebe.CVE_CONCEPTO || ': ' || vlImpConcepto || '  SDO: '|| vlImpSaldo || '  NETO: ' || vlImpNeto);
+                    
+               IF pTxrespuesta IS NOT NULL 
+                  THEN RETURN 2; 
+               END IF;
+                    
+            ELSE
+                -- Si ya no tiene saldo para el pago del concepto no paga completo
+                lbPagoCompleto  := FALSE;
+            END IF;
+        END LOOP;
+           
+        -- Se actualiza el monto del premovimiento
+        UPDATE PFIN_PRE_MOVIMIENTO
+           SET IMP_NETO            = vlImpNeto
+         WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+           AND CVE_EMPRESA         = pCveEmpresa
+           AND ID_PRE_MOVIMIENTO   = vlIdPreMovto;
+           
+        -- Se procesa el premovimiento
+        vlIdMovimiento := PKG_PROCESADOR_FINANCIERO.pprocesamovimiento(pcvegpoempresa, pcveempresa, vlIdPreMovto, 'PV', NULL, cFalso, ptxrespuesta);
+                
+        IF pTxrespuesta IS NOT NULL THEN 
+           ROLLBACK; 
+           RETURN 3; 
+        ELSE
+           -- Se actualiza el identificador del movimiento
+           UPDATE PFIN_PRE_MOVIMIENTO 
+              SET ID_MOVIMIENTO       = vlIdMovimiento
+            WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+              AND CVE_EMPRESA         = pCveEmpresa
+              AND ID_PRE_MOVIMIENTO   = vlIdPreMovto;
+        END IF;            
+
+        -- Actualiza la informacion de la tabla de amortizacion y de los accesorios con el movimiento generado
+        pActualizaTablaAmortizacion(pCveGpoEmpresa, pCveEmpresa, vlIdMovimiento, pTxRespuesta);
+        
+        RETURN 0;
+
+        EXCEPTION
+            WHEN OTHERS THEN
+                pTxrespuesta := SQLERRM;
+                RETURN 4;
+    END pAplicaPagoCreditoPorAmort;   
+    
+    -- Funcion que determina la proporcion del pago de acuerdo a un importe
+    FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
+                                pImpPago         IN PFIN_MOVIMIENTO.IMP_NETO%TYPE,
+                                pTxRespuesta     OUT VARCHAR2)
+    RETURN SYS_REFCURSOR
+    IS
+       vlBEsGrupo                    SIM_TABLA_AMORTIZACION.B_PAGADO%TYPE;    
+       vlResultado                   NUMBER;
+       vlSaldo                       PFIN_MOVIMIENTO.IMP_NETO%TYPE;
+       vlSaldoProrrateo              PFIN_MOVIMIENTO.IMP_NETO%TYPE;
+       vlImpAmortizacion             PFIN_MOVIMIENTO.IMP_NETO%TYPE;
+       vlNumAmortProrrateo           PFIN_MOVIMIENTO.NUM_PAGO_AMORTIZACION%TYPE;
+       vlCurSalida                   SYS_REFCURSOR;
+       
+       CURSOR curAmortizaciones IS
+         SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO_GRUPO, B.NUM_PAGO_AMORTIZACION, SUM(IMP_NETO * -1) AS IMP_DEUDA
+           FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+          WHERE A.CVE_GPO_EMPRESA   = pCveGpoEmpresa 
+            AND A.CVE_EMPRESA       = pCveEmpresa
+            AND A.ID_PRESTAMO_GRUPO = pIdPrestamo
+            AND A.CVE_GPO_EMPRESA   = B.CVE_GPO_EMPRESA
+            AND A.CVE_EMPRESA       = B.CVE_EMPRESA
+            AND A.ID_PRESTAMO       = B.ID_PRESTAMO
+          GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO_GRUPO, B.NUM_PAGO_AMORTIZACION
+          ORDER BY B.NUM_PAGO_AMORTIZACION;
+       
+       CURSOR curProporcion IS
+         SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO, SUM(IMP_DEUDA) AS IMP_DEUDA
+           FROM (SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO, ROUND(SUM(IMP_NETO *-1),2) AS IMP_DEUDA
+                   FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+                  WHERE A.CVE_GPO_EMPRESA   = pCveGpoEmpresa 
+                    AND A.CVE_EMPRESA       = pCveEmpresa
+                    AND A.ID_PRESTAMO_GRUPO = pIdPrestamo
+                    AND A.CVE_GPO_EMPRESA   = B.CVE_GPO_EMPRESA
+                    AND A.CVE_EMPRESA       = B.CVE_EMPRESA
+                    AND A.ID_PRESTAMO       = B.ID_PRESTAMO
+                    AND B.NUM_PAGO_AMORTIZACION < vlNumAmortProrrateo
+                  GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO
+                  UNION ALL
+                 SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO, 
+                        ROUND(SUM(IMP_NETO *-1) / vlImpAmortizacion * vlSaldoProrrateo,2) AS IMP_DEUDA
+                   FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+                  WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa 
+                    AND A.CVE_EMPRESA           = pCveEmpresa
+                    AND A.ID_PRESTAMO_GRUPO     = pIdPrestamo
+                    AND A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA
+                    AND A.CVE_EMPRESA           = B.CVE_EMPRESA
+                    AND A.ID_PRESTAMO           = B.ID_PRESTAMO
+                    AND B.NUM_PAGO_AMORTIZACION = vlNumAmortProrrateo
+                  GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO) A, SIM_PRESTAMO B, RS_GRAL_PERSONA C
+          WHERE A.CVE_GPO_EMPRESA = B.CVE_GPO_EMPRESA AND
+                A.CVE_EMPRESA     = B.CVE_EMPRESA     AND
+                A.ID_PRESTAMO     = B.ID_PRESTAMO     AND
+                B.CVE_GPO_EMPRESA = C.CVE_GPO_EMPRESA AND
+                B.CVE_EMPRESA     = C.CVE_EMPRESA     AND
+                B.ID_CLIENTE      = C.ID_PERSONA
+          GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO;
+
+    BEGIN
+       -- Valida que el credito sea grupal
+       BEGIN
+          SELECT cVerdadero
+            INTO vlBEsGrupo
+            FROM SIM_PRESTAMO_GRUPO
+           WHERE CVE_GPO_EMPRESA   = pCveGpoEmpresa
+             AND CVE_EMPRESA       = pCveEmpresa
+             AND ID_PRESTAMO_GRUPO = pIdPrestamo;
+             
+          EXCEPTION WHEN NO_DATA_FOUND THEN vlBEsGrupo := cFalso;
+             
+      END;      
+      
+      IF vlBEsGrupo = cFalso THEN
+         pTxRespuesta := 'El credito no es un credito grupal';
+         RETURN NULL;
+      END IF;
+      
+      -- Actualiza la informacion del credito a la fecha valor solicitada
+      vlResultado := fActualizaInformacionCredito(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, pFValor, pTxRespuesta);
+
+      IF vlResultado < 0 THEN
+         pTxRespuesta := 'El credito no se pudo actualizar';
+         RETURN NULL;
+      END IF;
+      
+      
+      -- Determina lo siguiente:
+      --          Amortizaciones que pueden cubrirse completamente con el pago
+      --          Sobrante
+      --          Amortizacion en la que se prorrateara el pago
+      
+      -- Inicializa saldo
+      vlSaldo           := pImpPago;
+      vlSaldoProrrateo  := 0;
+      vlImpAmortizacion := 0;
+      
+      -- Inicializa la amortizacion que se prorratea a un numero muy grande
+      vlNumAmortProrrateo := 99999;
+      
+      FOR vlAmortizaciones IN curAmortizaciones LOOP
+          vlSaldo := vlSaldo - vlAmortizaciones.IMP_DEUDA;
+          
+          IF vlSaldo < 0 THEN
+             vlNumAmortProrrateo := vlAmortizaciones.NUM_PAGO_AMORTIZACION;
+             vlSaldoProrrateo    := vlSaldo + vlAmortizaciones.IMP_DEUDA;
+             EXIT;
+          END IF;
+      END LOOP;
+      
+      -- Calcula el importe de la amortizacion a prorratear
+      SELECT SUM(IMP_NETO * -1)
+        INTO vlImpAmortizacion
+        FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+       WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa 
+         AND A.CVE_EMPRESA           = pCveEmpresa
+         AND A.ID_PRESTAMO_GRUPO     = pIdPrestamo
+         AND A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA
+         AND A.CVE_EMPRESA           = B.CVE_EMPRESA
+         AND A.ID_PRESTAMO           = B.ID_PRESTAMO
+         AND B.NUM_PAGO_AMORTIZACION = vlNumAmortProrrateo;
+      
+      -- Calcula el importe para cada participante del credito
+      FOR vlProporcion IN curProporcion LOOP
+          -- Despliega la informacion
+          DBMS_OUTPUT.PUT_LINE('Prestamo : ' || vlProporcion.ID_PRESTAMO || ' Importe : ' || vlProporcion.IMP_DEUDA ||
+                               ' Id Cliente: ' || vlProporcion.ID_CLIENTE || ' Nombre: ' || vlProporcion.NOM_COMPLETO);
+      END LOOP;
+      
+      OPEN vlCurSalida FOR
+         SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO, SUM(IMP_DEUDA) AS IMP_DEUDA
+           FROM (SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO, ROUND(SUM(IMP_NETO *-1),2) AS IMP_DEUDA
+                   FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+                  WHERE A.CVE_GPO_EMPRESA   = pCveGpoEmpresa 
+                    AND A.CVE_EMPRESA       = pCveEmpresa
+                    AND A.ID_PRESTAMO_GRUPO = pIdPrestamo
+                    AND A.CVE_GPO_EMPRESA   = B.CVE_GPO_EMPRESA
+                    AND A.CVE_EMPRESA       = B.CVE_EMPRESA
+                    AND A.ID_PRESTAMO       = B.ID_PRESTAMO
+                    AND B.NUM_PAGO_AMORTIZACION < vlNumAmortProrrateo
+                  GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO
+                  UNION ALL
+                 SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO, 
+                        ROUND(SUM(IMP_NETO *-1) / vlImpAmortizacion * vlSaldoProrrateo,2) AS IMP_DEUDA
+                   FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
+                  WHERE A.CVE_GPO_EMPRESA       = pCveGpoEmpresa 
+                    AND A.CVE_EMPRESA           = pCveEmpresa
+                    AND A.ID_PRESTAMO_GRUPO     = pIdPrestamo
+                    AND A.CVE_GPO_EMPRESA       = B.CVE_GPO_EMPRESA
+                    AND A.CVE_EMPRESA           = B.CVE_EMPRESA
+                    AND A.ID_PRESTAMO           = B.ID_PRESTAMO
+                    AND B.NUM_PAGO_AMORTIZACION = vlNumAmortProrrateo
+                  GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO) A, SIM_PRESTAMO B, RS_GRAL_PERSONA C
+          WHERE A.CVE_GPO_EMPRESA = B.CVE_GPO_EMPRESA AND
+                A.CVE_EMPRESA     = B.CVE_EMPRESA     AND
+                A.ID_PRESTAMO     = B.ID_PRESTAMO     AND
+                B.CVE_GPO_EMPRESA = C.CVE_GPO_EMPRESA AND
+                B.CVE_EMPRESA     = C.CVE_EMPRESA     AND
+                B.ID_CLIENTE      = C.ID_PERSONA
+          GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO;
+          
+      RETURN vlCurSalida;
+      
+    END fCalculaProporcion;
+    
+END PKG_CREDITO;

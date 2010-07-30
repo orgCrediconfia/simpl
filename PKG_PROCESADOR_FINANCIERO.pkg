@@ -1,0 +1,264 @@
+create or replace
+PACKAGE PKG_PROCESADOR_FINANCIERO AS
+
+    --Declaración de constantes
+    cSitPreMovtoNoProcesado             CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE := 'NP';
+    cSitPreMovtoProcesadoVirtual        CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE := 'PV';
+    cSitPreMovtoProcesadoReal           CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE := 'PR';
+    cSitPreMovtoCancelado               CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE := 'CA';
+    vgFechaSistema                      DATE;
+
+    --********************************************************************************************************--
+    --*     pProcesaMovimiento                                                                               *--
+    --*     Propósito:  Procesar un premovimiento y generar un movimiento afectando saldo en su caso         *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPremovimiento:   Identificador del premovimiento                                          *--
+    --*         pSitMovimiento:     Situación a procesar el movimiento PV, PR, O CA                          *--
+    --*         pBDebug:            Indica si se muestran los mensajes de debug                              *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado del error en caso de haber   *--
+    --*     Regresa:                                                                                         *--
+    --*         PFIN_MOVIMIENTO.ID_MOVIMIENTO Identificador del movimiento que se generó, en caso de error   *--
+    --*             devuelve 0 y en el parámetro pTxRespuesta el detalle del error                           *--
+    --********************************************************************************************************--
+    FUNCTION  pProcesaMovimiento(pCveGpoEmpresa     IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa        IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                 pIdPremovimiento   IN PFIN_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE,
+                                 pSitMovimiento     IN PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE,
+                                 pCveUsuarioCancela IN PFIN_MOVIMIENTO.CVE_USUARIO_CANCELA%TYPE,
+                                 pBDebug            IN PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE,
+                                 pTxrespuesta       OUT VARCHAR2)
+    RETURN PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
+                                            
+
+
+
+END pkg_procesador_financiero;
+/
+
+create or replace
+PACKAGE BODY PKG_PROCESADOR_FINANCIERO AS
+
+    PROCEDURE AsignaFechaSistema(pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE)
+    IS 
+    BEGIN
+        SELECT  F_MEDIO
+        INTO    vgFechaSistema
+        FROM    PFIN_PARAMETRO
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND CVE_MEDIO       = 'SYSTEM';
+    END AsignaFechaSistema;
+
+     FUNCTION  pProcesaMovimiento(pCveGpoEmpresa     IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                 pCveEmpresa        IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                 pIdPremovimiento   IN PFIN_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE,
+                                 pSitMovimiento     IN PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE,
+                                 pCveUsuarioCancela IN PFIN_MOVIMIENTO.CVE_USUARIO_CANCELA%TYPE,
+                                 pBDebug            IN PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE,
+                                 pTxrespuesta       OUT VARCHAR2)
+    RETURN PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE
+    IS
+
+    vlBufPreMovto       PFIN_PRE_MOVIMIENTO%ROWTYPE;
+    vlBufOperacion      PFIN_CAT_OPERACION%ROWTYPE;
+    vlIdMovimiento      PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
+    vlValidaFecha       DATE;
+        
+    BEGIN
+    
+        BEGIN    
+            -- Se asigna la fecha del sistema a la variable global
+            AsignaFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+            
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    pTxrespuesta := 'No se encuentra la fecha del sistema ';
+                    RETURN 0;
+        END;        
+
+        -- Se obtiene el premovimiento
+        BEGIN
+            SELECT  *
+            INTO    vlBufPreMovto
+            FROM    PFIN_PRE_MOVIMIENTO
+            WHERE   CVE_GPO_EMPRESA     = pCveGpoEmpresa
+                AND CVE_EMPRESA         = pCveEmpresa
+                AND ID_PRE_MOVIMIENTO   = pIdPremovimiento;
+
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    pTxrespuesta := 'No existe el premovimiento: '||pIdPremovimiento;
+                    RETURN 0;
+        END;        
+        
+        -- Se valida que la actualización sea correcta
+        IF NOT  vlBufPreMovto.SIT_PRE_MOVIMIENTO = cSitPreMovtoNoProcesado      AND 
+                pSitMovimiento IN (cSitPreMovtoProcesadoVirtual,cSitPreMovtoProcesadoReal) OR
+                vlBufPreMovto.SIT_PRE_MOVIMIENTO = cSitPreMovtoProcesadoVirtual AND 
+                pSitMovimiento IN (cSitPreMovtoCancelado,       cSitPreMovtoProcesadoReal) THEN
+            pTxrespuesta    := 'Tipo de actualización ilegal, de ' || vlBufPreMovto.SIT_PRE_MOVIMIENTO||' a '||pSitMovimiento;
+            RETURN 0;
+        END IF;
+                
+        IF pSitMovimiento <> 'CA' THEN
+           -- Se obtiene la configuración de la clave de operación
+           BEGIN
+              SELECT *
+                INTO vlBufOperacion
+                FROM PFIN_CAT_OPERACION
+               WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
+                 AND CVE_EMPRESA     = pCveEmpresa
+                 AND CVE_OPERACION   = vlBufPreMovto.CVE_OPERACION;
+    
+                EXCEPTION
+                    WHEN NO_DATA_FOUND THEN
+                        pTxrespuesta := 'No existe la operación: '||vlBufPreMovto.CVE_OPERACION;
+                        RETURN 0;
+            END;        
+            
+            IF vlBufPreMovto.F_OPERACION < vgFechaSistema THEN
+                -- Se envía el mensaje de error
+                pTxrespuesta    := 'Fecha de operación incorrecta, sólo se puede operar la fecha actual del sistema '||vgFechaSistema;
+                RETURN 0;
+            ELSIF vlBufPreMovto.F_LIQUIDACION < vlBufPreMovto.F_OPERACION AND vlBufPreMovto.CVE_MERCADO <> 'PRESTAMO' THEN
+                -- Se envía el mensaje de error
+                pTxrespuesta    := 'Fecha de liquidación incorrecta '||vlBufPreMovto.F_LIQUIDACION;
+                RETURN 0;
+            ELSE
+                
+                IF vlBufPreMovto.CVE_MERCADO <> 'PRESTAMO' OR vlBufPreMovto.F_LIQUIDACION >= vlBufPreMovto.F_OPERACION THEN
+                    BEGIN
+                        -- Se valida que la fecha de liquidación sea correcta
+                        SELECT  F_LIQUIDACION
+                        INTO    vlValidaFecha
+                        FROM    PFIN_DIA_LIQUIDACION
+                        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                            AND CVE_EMPRESA     = pCveEmpresa
+                            AND CVE_LIQUIDACION IN ('T+0','T+1','T+2','T+3','T+4','T+5')
+                            AND F_INFORMACION   = vlBufPreMovto.F_OPERACION
+                            AND F_LIQUIDACION   = vlBufPreMovto.F_LIQUIDACION;
+        
+                        EXCEPTION
+                            WHEN NO_DATA_FOUND THEN            
+                                pTxrespuesta    := 'Fecha de liquidación incorrecta '||vlBufPreMovto.F_LIQUIDACION;
+                                RETURN 0;
+                    END;
+                END IF;
+            END IF;
+    
+            -- Se obtiene el id del movimiento
+            SELECT  SQ01_PFIN_MOVIMIENTO.NEXTVAL
+            INTO    vlIdMovimiento  FROM DUAL;
+    
+            -- Se inserta el movimiento
+            INSERT  INTO PFIN_MOVIMIENTO(        
+                    CVE_GPO_EMPRESA, CVE_EMPRESA, ID_MOVIMIENTO, ID_CUENTA, CVE_DIVISA, F_OPERACION, F_LIQUIDACION, 
+                    CVE_OPERACION, IMP_NETO, PREC_OPERACION, TIPO_CAMBIO, ID_REFERENCIA, ID_PRESTAMO, CVE_MERCADO, 
+                    CVE_MEDIO, TX_NOTA, TX_REFERENCIA, ID_GRUPO, ID_PRE_MOVIMIENTO, SIT_MOVIMIENTO, FH_REGISTRO, 
+                    FH_ACTIVACION, LOG_IP_ADDRESS, LOG_OS_USER, LOG_HOST, CVE_USUARIO, F_APLICACION, NUM_PAGO_AMORTIZACION)
+            VALUES  (
+                    vlBufPreMovto.CVE_GPO_EMPRESA, 
+                    vlBufPreMovto.CVE_EMPRESA, 
+                    vlIdMovimiento,       --ID_MOVIMIENTO, 
+                    vlBufPreMovto.ID_CUENTA, 
+                    vlBufPreMovto.CVE_DIVISA, 
+                    vlBufPreMovto.F_OPERACION, 
+                    vlBufPreMovto.F_LIQUIDACION, 
+                    vlBufPreMovto.CVE_OPERACION, 
+                    vlBufPreMovto.IMP_NETO, 
+                    vlBufPreMovto.PREC_OPERACION, 
+                    vlBufPreMovto.TIPO_CAMBIO, 
+                    vlBufPreMovto.ID_REFERENCIA, 
+                    vlBufPreMovto.ID_PRESTAMO, 
+                    vlBufPreMovto.CVE_MERCADO, 
+                    vlBufPreMovto.CVE_MEDIO, 
+                    vlBufPreMovto.TX_NOTA, 
+                    vlBufPreMovto.TX_REFERENCIA, 
+                    vlBufPreMovto.ID_GRUPO, 
+                    vlBufPreMovto.ID_PRE_MOVIMIENTO, 
+                    cSitPreMovtoProcesadoVirtual,  --SIT_MOVIMIENTO, 
+                    vlBufPreMovto.FH_REGISTRO, 
+                    vlBufPreMovto.FH_ACTIVACION, 
+                    vlBufPreMovto.LOG_IP_ADDRESS, 
+                    vlBufPreMovto.LOG_OS_USER, 
+                    vlBufPreMovto.LOG_HOST, 
+                    vlBufPreMovto.CVE_USUARIO,
+                    NVL(vlBufPreMovto.F_APLICACION, vlBufPreMovto.F_LIQUIDACION),
+                    vlBufPreMovto.NUM_PAGO_AMORTIZACION);
+                -- Se inserta el detalle de la operación
+                
+                INSERT INTO PFIN_MOVIMIENTO_DET
+                SELECT CVE_GPO_EMPRESA, CVE_EMPRESA, vlIdMovimiento, CVE_CONCEPTO, IMP_CONCEPTO, TX_NOTA 
+                  FROM PFIN_PRE_MOVIMIENTO_DET
+                 WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+                   AND CVE_EMPRESA         = pCveEmpresa
+                   AND ID_PRE_MOVIMIENTO   = pIdPremovimiento;
+    
+            -- Se modifica la situación del premovimiento
+            UPDATE PFIN_PRE_MOVIMIENTO SET
+                   SIT_PRE_MOVIMIENTO  = cSitPreMovtoProcesadoVirtual,
+                   ID_MOVIMIENTO       = vlIdMovimiento
+             WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+               AND CVE_EMPRESA         = pCveEmpresa
+               AND ID_PRE_MOVIMIENTO   = pIdPremovimiento;
+        ELSE    -- En caso de ser una cancelación solo se actualiza la situacion del movimiento y premovimiento
+            -- Se modifica la situación del premovimiento
+            UPDATE PFIN_PRE_MOVIMIENTO SET
+                   SIT_PRE_MOVIMIENTO  = cSitPreMovtoCancelado,
+                   ID_MOVIMIENTO       = vlIdMovimiento,
+                   CVE_USUARIO_CANCELA = pCveUsuarioCancela
+             WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+               AND CVE_EMPRESA         = pCveEmpresa
+               AND ID_PRE_MOVIMIENTO   = pIdPremovimiento;
+        END IF;
+        
+        IF vlBufOperacion.CVE_AFECTA_SALDO IN ('I','D') THEN
+            BEGIN
+                -- Se afecta el saldo del cliente
+                UPDATE  PFIN_SALDO SET
+                        SDO_EFECTIVO    = SDO_EFECTIVO + (vlBufPreMovto.IMP_NETO * 
+                            CASE WHEN pSitMovimiento <> cSitPreMovtoCancelado THEN
+                                DECODE(vlBufOperacion.CVE_AFECTA_SALDO,'I',1,-1)
+                            ELSE
+                                DECODE(vlBufOperacion.CVE_AFECTA_SALDO,'I',-1,1)
+                            END)
+                WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                    AND CVE_EMPRESA     = pCveEmpresa 
+                    AND F_FOTO          = vlBufPreMovto.F_OPERACION
+                    AND ID_CUENTA       = vlBufPreMovto.ID_CUENTA
+                    AND CVE_DIVISA      = vlBufPreMovto.CVE_DIVISA;
+
+                IF SQL%NOTFOUND THEN
+                    -- Si no existe el saldo a la fecha se da de alta
+                    INSERT  INTO PFIN_SALDO
+                    VALUES( pCveGpoEmpresa,pCveEmpresa,vlBufPreMovto.F_OPERACION,
+                            vlBufPreMovto.ID_CUENTA,vlBufPreMovto.CVE_DIVISA,
+                            (vlBufPreMovto.IMP_NETO * 
+                                CASE WHEN pSitMovimiento <> cSitPreMovtoCancelado THEN
+                                DECODE(vlBufOperacion.CVE_AFECTA_SALDO,'I',1,-1)
+                            ELSE
+                                DECODE(vlBufOperacion.CVE_AFECTA_SALDO,'I',-1,1)
+                            END));
+                END IF;
+            
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        pTxrespuesta := 'Error al afectar el saldo: '||SQLERRM;
+                        RETURN 0;
+            END;        
+
+        END IF;
+
+        -- En caso de éxito se regresa el id del movimiento que se generó
+        RETURN vlIdMovimiento;
+                
+        EXCEPTION
+            WHEN OTHERS THEN
+                pTxrespuesta := 'Error al procesar el movimiento: '||SQLERRM;
+                RETURN 0;
+    END pProcesaMovimiento;
+                                   
+END PKG_PROCESADOR_FINANCIERO;

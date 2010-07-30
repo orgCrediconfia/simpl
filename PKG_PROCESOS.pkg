@@ -1,0 +1,495 @@
+create or replace
+PACKAGE PKG_PROCESOS AS
+    --********************************************************************************************************--
+    --*     RecorreFecha                                                                                    *--
+    --*     Propósito:  Actualiza la fecha medio de la tabla de parametros al siguiente dia habil           *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPrestamo:        Indentificador del préstamo                                              *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    FUNCTION RecorreFecha(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                          pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                          pTxrespuesta     OUT VARCHAR2)
+    RETURN VARCHAR2;
+    --********************************************************************************************************--
+    --*     CreaFechaLiquiacionAnio                                                                                    *--
+    --*     Propósito:  Generar las fechas de liquidación de los días hábiles del año                        *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPrestamo:        Indentificador del préstamo                                              *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    FUNCTION CreaFechaLiquiacionAnio(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                     pAnio            IN NUMBER)
+    RETURN VARCHAR2;
+
+    --********************************************************************************************************--
+    --*     pGeneraPreMovto                                                                                  *--
+    --*     Propósito:  Generar un movimiento de abono o cargo de tesorería                                  *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPreMovto         Identificador del premovimiento                                          *--
+    --*         pIdCuenta           Identificador de la cuenta del cliente                                   *--
+    --*         pIdPrestamo:        Indentificador del préstamo                                              *--
+    --*         pCveDivisa:         Clave de la divisa                                                       *--
+    --*         pCveOperacion:      Clave de la operación                                                    *--
+    --*         pImpNeto:           Importe del abono                                                        *--
+    --*         pCveMedio:          Clave del medio por donde se genera el movimiento                        *--
+    --*         pCveMercado:        Clave del mercado al que pertenece el movimiento                         *--
+    --*         pTxNota:            Nota que describe el movimiento                                          *--
+    --*         pIdGrupo:           Identificador del grupo de movimientos                                   *--
+    --*         pCveUsuario:        Clave del usuario que genera el movimiento                               *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    PROCEDURE pGeneraPreMovto(  pCveGpoEmpresa  IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa     IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdPreMovto     IN PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE, 
+                                pFLiquidacion   IN PFIN_PRE_MOVIMIENTO.F_LIQUIDACION%TYPE, 
+                                pIdCuenta       IN PFIN_PRE_MOVIMIENTO.ID_CUENTA%TYPE, 
+                                pIdPrestamo     IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                pCveDivisa      IN PFIN_PRE_MOVIMIENTO.CVE_DIVISA%TYPE, 
+                                pCveOperacion   IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE, 
+                                pImpNeto        IN PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE, 
+                                pCveMedio       IN PFIN_PRE_MOVIMIENTO.CVE_MEDIO%TYPE, 
+                                pCveMercado     IN PFIN_PRE_MOVIMIENTO.CVE_MERCADO%TYPE, 
+                                pTxNota         IN PFIN_PRE_MOVIMIENTO.TX_NOTA%TYPE, 
+                                pIdGrupo        IN PFIN_PRE_MOVIMIENTO.ID_GRUPO%TYPE,
+                                pCveUsuario     IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                pFValor         IN PFIN_PRE_MOVIMIENTO.F_LIQUIDACION%TYPE,
+                                pNumPagoAmort   IN PFIN_PRE_MOVIMIENTO.NUM_PAGO_AMORTIZACION%TYPE,                                
+                                pTxrespuesta    OUT VARCHAR2);
+    --********************************************************************************************************--
+    --*     pGeneraPreMovtoCreditoDet                                                                        *--
+    --*     Propósito:  Generar un registro con el detalle de un concepto de una operación de tesorería      *--
+    --*     Parámetros:                                                                                      *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                                                *--
+    --*         pCveEmpresa:        Clave de Empresa                                                         *--
+    --*         pIdPreMovto         Identificador del premovimiento                                          *--
+    --*         pCveOperacion:      Clave de la operación                                                    *--
+    --*         pCveConcepto:       Clave del concepto de detalle                                            *--
+    --*         pImpNeto:           Importe del abono                                                        *--
+    --*         pTxNota:            Nota que describe el movimiento                                          *--
+    --*         pTxRespuesta:       Parámetro de salida que indica el resultado de la operación              *--
+    --********************************************************************************************************--
+    PROCEDURE pGeneraPreMovtoDet(   pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                    pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                    pIdPreMovto      IN PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE, 
+                                    pCveConcepto     IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE, 
+                                    pImpNeto         IN PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE, 
+                                    pTxNota          IN PFIN_PRE_MOVIMIENTO.TX_NOTA%TYPE, 
+                                    pTxrespuesta     OUT VARCHAR2);
+
+END PKG_PROCESOS;
+/
+
+create or replace
+PACKAGE BODY PKG_PROCESOS AS
+    FUNCTION RecorreFecha(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                          pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                          pTxrespuesta     OUT VARCHAR2)
+    RETURN VARCHAR2
+    IS
+    BEGIN
+       UPDATE PFIN_PARAMETRO A
+          SET F_MEDIO = (SELECT F_LIQUIDACION
+                           FROM PFIN_DIA_LIQUIDACION
+                          WHERE CVE_GPO_EMPRESA  = pCveGpoEmpresa AND
+                                CVE_EMPRESA      = pCveEmpresa    AND
+                                CVE_LIQUIDACION  = 'T+1'          AND
+                                F_INFORMACION    = A.F_MEDIO)
+        WHERE CVE_GPO_EMPRESA  = pCveGpoEmpresa AND
+              CVE_EMPRESA      = pCveEmpresa    AND
+              CVE_MEDIO        = 'SYSTEM';
+        
+        -- Copia los saldos del dia de ayer      
+        RETURN 'El proceso ha terminado';            
+        
+    END RecorreFecha;
+    
+    FUNCTION dameFechaSistema(  pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE)
+    RETURN DATE
+    --************************************************************************************--
+    --*     dameFechaSistema                                                             *--
+    --*     Propósito:  Obtener la fecha actual del sistema                              *--
+    --*     Parámetros:                                                                  *--
+    --*         pCveGpoEmpresa:     Clave de Grupo de Empresa                            *--
+    --*         pCveEmpresa:        Clave de Empresa                                     *--
+    --************************************************************************************--
+    IS 
+        vlFechaSistema  DATE;
+    BEGIN
+        SELECT  F_MEDIO
+        INTO    vlFechaSistema
+        FROM    PFIN_PARAMETRO
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND CVE_MEDIO       = 'SYSTEM';
+        
+        RETURN vlFechaSistema;
+        
+        EXCEPTION
+            WHEN OTHERS THEN
+                RETURN 'X';
+    END dameFechaSistema;
+    FUNCTION CreaFechaLiquiacionAnio(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                     pAnio            IN NUMBER)
+    RETURN VARCHAR2
+    IS
+    -- Declaración de variables
+    vlFechaHoy      PFIN_PARAMETRO.F_MEDIO%TYPE;
+    vlFechaFin      PFIN_PARAMETRO.F_MEDIO%TYPE;
+    vlFechaT001     PFIN_PARAMETRO.F_MEDIO%TYPE;
+    vlFechaTemp     DATE;
+    vlFDiaSiguiente DATE;
+    PROCEDURE ActualizaFecha(pCveGpoEmpresa IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                             pCveEmpresa    IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                             pFechaHoy      IN PFIN_PARAMETRO.F_MEDIO%TYPE,
+                             pFechaT001     IN PFIN_PARAMETRO.F_MEDIO%TYPE)
+    IS
+    --****************************************************************************************--
+    --* Objetivo   :  Actualizar la tabla de CORP_DIA_LIQUIDA_DET con la nueva fecha del dia *--
+    --*               de operación y asignar las fechas de liquidación para esa fecha.       *--
+    --*               Insertar en la tabla CORP_VIGENCIA_POSICION los días de vigencia para  *--
+    --*               la fecha.                                                              *--
+    --* Parámetros :                                                                         *--
+    --*               pCveEntidad : Clave de la entidad.                      *--
+    --*               pIdEmpresa  : Id de la empresa.                                        *--
+    --*               pFechaHoy   : Fecha del día de operación actual.          *--
+    --*               pFechaT001  : Fecha de liquidación T001 ( Fecha de operación del       *--
+    --*                             siguiente día.                                           *--
+    --* Regresa    :                                                                         *--
+    --*               No devuelve ningún dato.                                               *--
+    --****************************************************************************************--
+    -- Declaración de variables locales
+    TYPE arCveDiaLiquida    IS TABLE OF VARCHAR2(4) INDEX BY BINARY_INTEGER;
+    arrayDiaLiquidacion     arCveDiaLiquida;
+    vlCveDiaLiquidacion     VARCHAR2(4);
+    vlCount                 NUMBER(1);
+    vlFechaT004             DATE;
+    vlFechaT005             DATE;
+    vlFFestivo              DATE;
+    vlFDiaVigencia          DATE;
+    bFechaValida            BOOLEAN;
+    vlDia                   VARCHAR2(10);
+    CURSOR curFecha IS
+        -- Se recupera las fechas de liquidación de la fecha de operación actual
+        SELECT  F_LIQUIDACION
+        FROM    PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND F_INFORMACION   = pFechaHoy
+            AND CVE_LIQUIDACION LIKE 'T+%'
+            AND CVE_LIQUIDACION <> 'T+0'
+        ORDER BY F_LIQUIDACION ASC;
+    BEGIN
+            -- Contador para ubicar la cve_dia_liquida actual
+            vlCount := 0;
+            -- se asignan los valores al array
+            arrayDiaLiquidacion(0) := 'T+0';
+            arrayDiaLiquidacion(1) := 'T+1';
+            arrayDiaLiquidacion(2) := 'T+2';
+            arrayDiaLiquidacion(3) := 'T+3';
+            arrayDiaLiquidacion(4) := 'T+4';
+            -- Bandera para validar cuando se ha encontrado una fecha válida
+            bFechaValida := FALSE;
+            -- Se iteran las fechas de liquidación
+            FOR vlBufferFecha IN curFecha LOOP
+                -- Cuando entra por primera vez se inserta la fecha liquidación AYER
+                IF vlCount = 0 THEN
+                    vlFDiaSiguiente := vlBufferFecha.f_liquidacion;
+                    -- Se inserta la fecha de hoy como fecha de ayer para el dia siguiente
+                    INSERT INTO PFIN_DIA_LIQUIDACION (
+                            CVE_GPO_EMPRESA, 
+                            CVE_EMPRESA, 
+                            CVE_LIQUIDACION, 
+                            F_INFORMACION, 
+                            F_LIQUIDACION)
+                        VALUES(
+                            pCveGpoEmpresa,
+                            pCveEmpresa,
+                            'AYER',
+                            pFechaT001,
+                            pFechaHoy);
+                END IF;
+                -- Se obtiene la cve_liquidacón
+                vlCveDiaLiquidacion := arrayDiaLiquidacion(vlCount);
+                INSERT INTO PFIN_DIA_LIQUIDACION (
+                        CVE_GPO_EMPRESA, 
+                        CVE_EMPRESA, 
+                        CVE_LIQUIDACION, 
+                        F_INFORMACION, 
+                        F_LIQUIDACION)
+                    VALUES(
+                        pCveGpoEmpresa,
+                        pCveEmpresa,
+                        vlCveDiaLiquidacion,
+                        pFechaT001,
+                        vlBufferFecha.f_liquidacion);
+                vlFechaT004 := vlBufferFecha.f_liquidacion;
+                vlCount     := vlCount + 1;
+            END LOOP;
+            -- Se suma un día a la fecha T004
+            vlFechaT005 := vlFechaT004 + 1;
+            -- Verifica si la variable vlFechaT005 contiene una fecha de operación válida,
+            -- (Que no sea día festivo ni sábado o domingo).
+            WHILE NOT bFechaValida LOOP
+                BEGIN
+                    vlDia := TO_CHAR(vlFechaT005, 'D');
+                    IF vlDia <> '1' AND vlDia <> '7' THEN
+                        BEGIN
+                            SELECT  F_DIA_FESTIVO
+                            INTO    vlFFestivo
+                            FROM    PFIN_DIA_FESTIVO
+                            WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                                AND CVE_EMPRESA     = pCveEmpresa
+                                AND CVE_PAIS        = 'MX'
+                                AND F_DIA_FESTIVO   = vlFechaT005;
+                            EXCEPTION
+                                WHEN NO_DATA_FOUND THEN
+                                    bFechaValida := TRUE;
+                        END;
+                    END IF;
+                    -- Si se ha encontrado una fecha válida se inserta la fecha para T005
+                    IF bFechaValida THEN
+                        INSERT INTO PFIN_DIA_LIQUIDACION (
+                                CVE_GPO_EMPRESA, 
+                                CVE_EMPRESA, 
+                                CVE_LIQUIDACION, 
+                                F_INFORMACION, 
+                                F_LIQUIDACION)
+                            VALUES(
+                                pCveGpoEmpresa,
+                                pCveEmpresa,
+                                'T+5',
+                                pFechaT001,
+                                vlFechaT005);
+                    END IF;
+                    vlFechaT005 := vlFechaT005 + 1;
+                END LOOP;
+            END LOOP;
+    END ActualizaFecha;
+    BEGIN
+        DELETE  PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND F_INFORMACION   > TO_DATE('10-01-'|| TRIM(TO_CHAR(TO_NUMBER(pAnio))),'DD-MM-YYYY');
+            
+        DELETE  PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND CVE_LIQUIDACION = 'FM01'
+            And F_INFORMACION   >= TO_DATE('1-12-'|| TRIM(TO_CHAR(TO_NUMBER(pAnio)-1)),'DD-MM-YYYY');
+        -- Se obtiene la fecha inicial para recorrer
+        DELETE  PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND CVE_LIQUIDACION = 'FM00'
+            And F_INFORMACION   >= TO_DATE('1-01-'|| TRIM(TO_CHAR(TO_NUMBER(pAnio))),'DD-MM-YYYY');
+
+        SELECT  F_INFORMACION
+        INTO    vlFechaHoy
+        From    PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND F_INFORMACION   = ( SELECT  MAX(F_INFORMACION)
+                                    FROM    PFIN_DIA_LIQUIDACION
+                                    WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                                        AND CVE_EMPRESA     = pCveEmpresa
+                                        AND F_INFORMACION   >= TO_DATE('1-01-'|| TRIM(TO_CHAR(TO_NUMBER(pAnio))),'DD-MM-YYYY'))
+            AND CVE_LIQUIDACION = 'T+0';
+        vlFechaFin := TO_DATE('10-01-'||TRIM(TO_CHAR(TO_NUMBER(pAnio) + 1)),'DD-MM-YYYY');
+        
+        vlFDiaSiguiente := vlFechaHoy;
+        while vlFechaHoy <= vlFechaFin loop
+            vlFechaHoy  := vlFDiaSiguiente;
+            -- se obtiene la fecha de liquidación de T001 de la fecha de hoy para
+            -- crear las fechas de liquidación de la fecha del dia siguiente
+        SELECT  F_LIQUIDACION
+        INTO    vlFechaT001
+        From    PFIN_DIA_LIQUIDACION
+        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+            AND CVE_EMPRESA     = pCveEmpresa
+            AND F_INFORMACION   = vlFechaHoy
+            AND CVE_LIQUIDACION = 'T+1';
+        -- Se actualiza la fecha
+        ActualizaFecha(pCveGpoEmpresa,pCveEmpresa,vlFechaHoy,vlFechaT001);
+        END LOOP;
+        -- Inserta las fechas de fin de mes anterior para las fechas creadas
+        INSERT INTO PFIN_DIA_LIQUIDACION (
+                CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                CVE_LIQUIDACION, 
+                F_INFORMACION, 
+                F_LIQUIDACION)
+        SELECT  CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                'FM-1',
+                F_INFORMACION,
+               (SELECT  MAX(F_INFORMACION)
+                FROM    PFIN_DIA_LIQUIDACION
+                WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                    AND CVE_EMPRESA     = pCveEmpresa 
+                    AND TO_CHAR(F_INFORMACION, 'MMYYYY') = TO_CHAR(ADD_MONTHS(A.F_INFORMACION,-1),'MMYYYY'))
+        FROM    PFIN_DIA_LIQUIDACION A
+        WHERE   A.CVE_GPO_EMPRESA   = pCveGpoEmpresa
+            AND A.CVE_EMPRESA       = pCveEmpresa 
+            AND A.F_INFORMACION     > TO_DATE('10-01-'||pAnio,'DD-MM-YYYY')
+            AND CVE_LIQUIDACION     = 'T+0';
+        -- Inserta las fechas de fin de mes posterior para las fechas creadas
+        INSERT INTO PFIN_DIA_LIQUIDACION (
+                CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                CVE_LIQUIDACION, 
+                F_INFORMACION, 
+                F_LIQUIDACION)
+        SELECT  CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                'FM01',
+                F_INFORMACION,
+               (SELECT  MAX(F_INFORMACION)
+                FROM    PFIN_DIA_LIQUIDACION
+                WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                    AND CVE_EMPRESA     = pCveEmpresa 
+                    AND TO_CHAR(F_INFORMACION, 'MMYYYY') = TO_CHAR(ADD_MONTHS(A.F_INFORMACION,1),'MMYYYY'))
+        FROM    PFIN_DIA_LIQUIDACION A
+        WHERE   A.CVE_GPO_EMPRESA   = pCveGpoEmpresa
+            AND A.CVE_EMPRESA       = pCveEmpresa 
+            AND A.F_INFORMACION     >= TO_DATE('1-12-'||TRIM(TO_CHAR(TO_NUMBER(pAnio) -1)),'DD-MM-YYYY')
+            AND A.F_INFORMACION     <= TO_DATE('30-11-'||pAnio,'DD-MM-YYYY')
+            AND CVE_LIQUIDACION     = 'T+0';
+        
+        -- Inserta las fechas de fin de mes actual para las fechas creadas
+        INSERT INTO PFIN_DIA_LIQUIDACION (
+                CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                CVE_LIQUIDACION, 
+                F_INFORMACION, 
+                F_LIQUIDACION)
+        SELECT  CVE_GPO_EMPRESA, 
+                CVE_EMPRESA, 
+                'FM00',
+                F_INFORMACION,
+               (SELECT  MAX(F_INFORMACION)
+                FROM    PFIN_DIA_LIQUIDACION
+                WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                    AND CVE_EMPRESA     = pCveEmpresa 
+                    AND TO_CHAR(F_INFORMACION, 'MMYYYY') = TO_CHAR(A.F_INFORMACION,'MMYYYY'))
+        FROM    PFIN_DIA_LIQUIDACION A
+        WHERE   A.CVE_GPO_EMPRESA   = pCveGpoEmpresa
+            AND A.CVE_EMPRESA       = pCveEmpresa 
+            AND A.F_INFORMACION     BETWEEN TO_DATE('1-01-'||pAnio,'DD-MM-YYYY') AND TO_DATE('31-12-'||pAnio,'DD-MM-YYYY')
+            AND A.CVE_LIQUIDACION   = 'T+0';
+        COMMIT;
+        RETURN 'El proceso ha terminado';
+    END CreaFechaLiquiacionAnio;
+    PROCEDURE pGeneraPreMovto(  pCveGpoEmpresa  IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                pCveEmpresa     IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                pIdPreMovto     IN PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE, 
+                                pFLiquidacion   IN PFIN_PRE_MOVIMIENTO.F_LIQUIDACION%TYPE, 
+                                pIdCuenta       IN PFIN_PRE_MOVIMIENTO.ID_CUENTA%TYPE, 
+                                pIdPrestamo     IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                pCveDivisa      IN PFIN_PRE_MOVIMIENTO.CVE_DIVISA%TYPE, 
+                                pCveOperacion   IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE, 
+                                pImpNeto        IN PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE, 
+                                pCveMedio       IN PFIN_PRE_MOVIMIENTO.CVE_MEDIO%TYPE, 
+                                pCveMercado     IN PFIN_PRE_MOVIMIENTO.CVE_MERCADO%TYPE, 
+                                pTxNota         IN PFIN_PRE_MOVIMIENTO.TX_NOTA%TYPE, 
+                                pIdGrupo        IN PFIN_PRE_MOVIMIENTO.ID_GRUPO%TYPE,
+                                pCveUsuario     IN PFIN_PRE_MOVIMIENTO.CVE_USUARIO%TYPE,
+                                pFValor         IN PFIN_PRE_MOVIMIENTO.F_LIQUIDACION%TYPE,
+                                pNumPagoAmort   IN PFIN_PRE_MOVIMIENTO.NUM_PAGO_AMORTIZACION%TYPE,
+                                pTxrespuesta    OUT VARCHAR2)
+    IS
+        V               PFIN_PRE_MOVIMIENTO%ROWTYPE;
+        vlValidaFecha   DATE;
+    BEGIN
+        --Se obtiene la fecha del sistema
+        V.F_OPERACION       := dameFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+        
+        IF pFLiquidacion < V.F_OPERACION AND pCveMercado <> 'PRESTAMO' THEN
+            -- Se envía el mensaje de error
+            pTxrespuesta    := 'Fecha de liquidación incorrecta';
+            RETURN;
+        ELSE
+            IF pCveMercado <> 'PRESTAMO' THEN
+                BEGIN
+                    -- Se valida que la fecha de liquidación sea correcta
+                    SELECT  F_LIQUIDACION
+                    INTO    vlValidaFecha
+                    FROM    PFIN_DIA_LIQUIDACION
+                    WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
+                        AND CVE_EMPRESA     = pCveEmpresa
+                        AND CVE_LIQUIDACION IN ('T+0','T+1','T+2','T+3','T+4','T+5')
+                        AND F_INFORMACION   = V.F_OPERACION
+                        AND F_LIQUIDACION   = pFLiquidacion;
+    
+                    EXCEPTION
+                        WHEN NO_DATA_FOUND THEN            
+                            pTxrespuesta    := 'Fecha de liquidación incorrecta '||pFLiquidacion;
+                            RETURN;
+                END;
+            END IF;
+        END IF;
+        
+        -- Se asignan los valores a las variables
+        V.CVE_GPO_EMPRESA        := pCveGpoEmpresa;
+        V.CVE_EMPRESA            := pCveEmpresa;
+        V.F_LIQUIDACION          := pFLiquidacion;
+        V.ID_PRE_MOVIMIENTO      := pIdPreMovto;
+        V.ID_CUENTA              := pIdCuenta;
+        V.ID_PRESTAMO            := pIdPrestamo;
+        V.CVE_DIVISA             := pCveDivisa;
+        V.CVE_OPERACION          := pCveOperacion;
+        V.IMP_NETO               := pImpNeto;
+        V.PREC_OPERACION         := 0;
+        V.TIPO_CAMBIO            := 0;
+        V.CVE_MERCADO            := pCveMercado;
+        V.CVE_MEDIO              := pCveMedio; 
+        V.TX_NOTA                := pTxNota;
+        V.ID_GRUPO               := pIdGrupo;
+        V.ID_MOVIMIENTO          := 0;
+        V.CVE_USUARIO            := pCveUsuario;
+        V.SIT_PRE_MOVIMIENTO     := 'NP';
+        V.F_APLICACION           := pFValor;
+        V.NUM_PAGO_AMORTIZACION  := pNumPagoAmort;
+        
+        INSERT INTO PFIN_PRE_MOVIMIENTO VALUES V;
+        
+        EXCEPTION
+            WHEN OTHERS THEN 
+                pTxrespuesta := 'Error al insertar el premovimiento '||SQLERRM;
+    END pGeneraPreMovto;
+    PROCEDURE pGeneraPreMovtoDet(   pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                    pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                    pIdPreMovto      IN PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE, 
+                                    pCveConcepto     IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE, 
+                                    pImpNeto         IN PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE, 
+                                    pTxNota          IN PFIN_PRE_MOVIMIENTO.TX_NOTA%TYPE, 
+                                    pTxrespuesta     OUT VARCHAR2)
+    IS
+        V       PFIN_PRE_MOVIMIENTO_DET%ROWTYPE;
+    BEGIN
+        
+        -- Se asignan los valores a las variables
+        V.CVE_GPO_EMPRESA   := pCveGpoEmpresa;
+        V.CVE_EMPRESA       := pCveEmpresa;
+        V.ID_PRE_MOVIMIENTO := pIdPreMovto;
+        V.CVE_CONCEPTO      := pCveConcepto;
+        V.IMP_CONCEPTO      := pImpNeto;
+        V.TX_NOTA           := pTxNota;
+        
+        INSERT INTO PFIN_PRE_MOVIMIENTO_DET VALUES V;
+        
+        EXCEPTION
+            WHEN OTHERS THEN 
+                pTxrespuesta := 'Error al insertar el concepto '||SQLERRM;            
+    END pGeneraPreMovtoDet;
+    
+END PKG_PROCESOS;
