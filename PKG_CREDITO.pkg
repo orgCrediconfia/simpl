@@ -1,5 +1,4 @@
-create or replace
-PACKAGE PKG_CREDITO AS
+CREATE OR REPLACE PACKAGE PKG_CREDITO AS
 
     -- Declaración de variables globales
     vgFechaSistema                      DATE;
@@ -113,7 +112,7 @@ PACKAGE PKG_CREDITO AS
                                           pTxRespuesta     OUT VARCHAR2);    
 
     -- Funcion que determina la proporcion del pago de acuerdo a un importe
-    FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+      FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                 pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
                                 pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
                                 pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
@@ -124,8 +123,8 @@ PACKAGE PKG_CREDITO AS
 END PKG_CREDITO;
 /
 
-create or replace
-PACKAGE BODY PKG_CREDITO AS
+
+CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
 
     FUNCTION dameIdTasaRefDet(  pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                 pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
@@ -709,7 +708,9 @@ PACKAGE BODY PKG_CREDITO AS
            SET B_PAGO_PUNTUAL        = CASE WHEN FECHA_AMORTIZACION >= vlFValor AND vlBPagado = cVerdadero THEN cVerdadero
                                             ELSE cFalso
                                        END,
-               B_PAGADO              = vlBPagado
+               B_PAGADO              = vlBPagado,
+               IMP_PAGO_PAGADO       = NVL(IMP_CAPITAL_AMORT_PAGADO,0) + NVL(IMP_INTERES_PAGADO,0) + NVL(IMP_INTERES_EXTRA_PAGADO,0) + 
+                                       NVL(IMP_IVA_INTERES_PAGADO,0) + NVL(IMP_IVA_INTERES_EXTRA_PAGADO,0)
          WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa
            AND CVE_EMPRESA           = pCveEmpresa
            AND ID_PRESTAMO           = vlIdPrestamo
@@ -1225,10 +1226,13 @@ PACKAGE BODY PKG_CREDITO AS
        CASE
           -- Procesa todos los creditos
           WHEN pIdPrestamo = 0 THEN
+               DBMS_OUTPUT.PUT_LINE('Procesando todos los creditos');
                FOR vlBufAmorizacion IN curTodo LOOP
+                   DBMS_OUTPUT.PUT_LINE('Procesando el credito : ' || vlBufAmorizacion.ID_PRESTAMO || ' Amortizacion : ' || vlBufAmorizacion.IMP_PAGO_TARDIO);
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
-                                         
+                   
+                   DBMS_OUTPUT.PUT_LINE('Pago tardio : ' || vlBufAmorizacion.IMP_PAGO_TARDIO || ' Interes : ' || vlInteresMora);
                    UPDATE SIM_TABLA_AMORTIZACION
                       SET IMP_PAGO_TARDIO      = vlBufAmorizacion.IMP_PAGO_TARDIO,
                           IMP_INTERES_MORA     = vlInteresMora,
@@ -1241,6 +1245,7 @@ PACKAGE BODY PKG_CREDITO AS
                END LOOP;
           -- Procesa un grupo
           WHEN vlBEsGrupo = cVerdadero THEN
+               DBMS_OUTPUT.PUT_LINE('Procesando un grupo');          
                FOR vlBufAmorizacion IN curPorGpoPrestamo LOOP
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
@@ -1258,6 +1263,7 @@ PACKAGE BODY PKG_CREDITO AS
           
           -- Procesa un credito individual
           ELSE 
+               DBMS_OUTPUT.PUT_LINE('Procesando un credito');
                FOR vlBufAmorizacion IN curPorPrestamo LOOP
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
@@ -1430,7 +1436,9 @@ PACKAGE BODY PKG_CREDITO AS
        vlImpAmortizacion             PFIN_MOVIMIENTO.IMP_NETO%TYPE;
        vlNumAmortProrrateo           PFIN_MOVIMIENTO.NUM_PAGO_AMORTIZACION%TYPE;
        vlCurSalida                   SYS_REFCURSOR;
-       
+ 
+       -- Cursor que devuelve las amortizaciones del prestamo para todos los integrantes de un grupo y ordenadas por
+       -- el numero de amortizacion, esto seria por orden cronologico
        CURSOR curAmortizaciones IS
          SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO_GRUPO, B.NUM_PAGO_AMORTIZACION, SUM(IMP_NETO * -1) AS IMP_DEUDA
            FROM SIM_PRESTAMO_GPO_DET A, V_SIM_TABLA_AMORT_CONCEPTO B
@@ -1443,6 +1451,8 @@ PACKAGE BODY PKG_CREDITO AS
           GROUP BY A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO_GRUPO, B.NUM_PAGO_AMORTIZACION
           ORDER BY B.NUM_PAGO_AMORTIZACION;
        
+       -- Cursor que devuelve el monto del pago que se asignara a cada participante
+       -- Se suma las amortizaciones pagadas totalmente mas la proporcion de la amortizacion final
        CURSOR curProporcion IS
          SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO, SUM(IMP_DEUDA) AS IMP_DEUDA
            FROM (SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, B.ID_PRESTAMO, ROUND(SUM(IMP_NETO *-1),2) AS IMP_DEUDA
@@ -1582,3 +1592,4 @@ PACKAGE BODY PKG_CREDITO AS
     END fCalculaProporcion;
     
 END PKG_CREDITO;
+/
