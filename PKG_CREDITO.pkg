@@ -697,10 +697,10 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                NUM_PAGO_AMORTIZACION = vlNumAmortizacion;
         
         -- Verifica si se liquido el pago total del credito
-        IF ABS(vlImpDeuda) > .05 THEN 
-           vlBPagado := cFalso;
-        ELSE 
+        IF vlImpDeuda > -.02 THEN 
            vlBPagado := cVerdadero ;
+        ELSE 
+           vlBPagado := cFalso;
         END IF;
         
         -- Actualiza la informacion de pago puntual y pago completo en la tabla de amortizacion 
@@ -709,8 +709,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                                             ELSE cFalso
                                        END,
                B_PAGADO              = vlBPagado,
-               IMP_PAGO_PAGADO       = NVL(IMP_CAPITAL_AMORT_PAGADO,0) + NVL(IMP_INTERES_PAGADO,0) + NVL(IMP_INTERES_EXTRA_PAGADO,0) + 
-                                       NVL(IMP_IVA_INTERES_PAGADO,0) + NVL(IMP_IVA_INTERES_EXTRA_PAGADO,0)
+               IMP_PAGO_PAGADO       = IMP_CAPITAL_AMORT_PAGADO + IMP_INTERES_PAGADO + IMP_INTERES_EXTRA_PAGADO + 
+                                       IMP_IVA_INTERES_PAGADO   + IMP_IVA_INTERES_EXTRA_PAGADO               
          WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa
            AND CVE_EMPRESA           = pCveEmpresa
            AND ID_PRESTAMO           = vlIdPrestamo
@@ -726,12 +726,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
     vlIdCliente         SIM_PRESTAMO.ID_CLIENTE%TYPE;
     vlIdGrupo           SIM_PRESTAMO.ID_GRUPO%TYPE;
     vlIdSucursal        SIM_PRODUCTO_SUCURSAL.ID_SUCURSAL%TYPE;
-    vlTasaIVA           SIM_CAT_SUCURSAL.TASA_IVA%TYPE;
     vlCveMetodo         SIM_PRESTAMO.CVE_METODO%TYPE;
     vlPlazo             SIM_PRESTAMO.PLAZO%TYPE;
-    vlFInicioEntrega    SIM_PRESTAMO.FECHA_ENTREGA%TYPE;
-    vlMontoInicial      SIM_CLIENTE_MONTO.MONTO_AUTORIZADO%TYPE;
     vlTasaInteres       SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+    vlTasaIVA           SIM_CAT_SUCURSAL.TASA_IVA%TYPE;    
+    vlFInicioEntrega    SIM_PRESTAMO.FECHA_ENTREGA%TYPE;
+    vlMontoInicial      SIM_CLIENTE_MONTO.MONTO_AUTORIZADO%TYPE;    
     vlFReal             SIM_PRESTAMO.FECHA_REAL%TYPE;
     vlFEntrega          SIM_PRESTAMO.FECHA_ENTREGA%TYPE;
     vlIdPeriodicidad    SIM_PRESTAMO.ID_PERIODICIDAD_PRODUCTO%TYPE;
@@ -862,6 +862,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
         V.IMP_IVA_INTERES_EXTRA_PAGADO  := 0;
         V.B_PAGADO                      := cFalso;
         V.FECHA_AMORT_PAGO_ULTIMO       := NULL; 
+        V.IMP_CAPITAL_AMORT_PREPAGO     := 0;
+        V.NUM_DIA_ATRASO                := 0;
            
         WHILE i < vlPlazo LOOP
             BEGIN
@@ -910,11 +912,13 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                                 RETURN;
                             END IF;
 
-                            V.IMP_INTERES_EXTRA := 0;
+                            V.IMP_INTERES_EXTRA     := 0;
+                            V.IMP_IVA_INTERES_EXTRA := 0;
                         END IF;
 
                     ELSE
-                        V.IMP_INTERES_EXTRA := 0;
+                        V.IMP_INTERES_EXTRA     := 0;
+                        V.IMP_IVA_INTERES_EXTRA := 0;
                     END IF;
 
                     -- Se guarda el monto para cálculos posteriores
@@ -974,6 +978,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                 V.IMP_IVA_INTERES_MORA          := 0;
                 V.IMP_IVA_INTERES_MORA_PAGADO   := 0;
                 V.F_VALOR_CALCULO               := NULL;
+                V.F_INI_AMORTIZACION            := V.FECHA_AMORTIZACION - vlDiasPeriodicidad;
                 
                 -- Actualiza el importe de interes devengado por dia, no incluye el interes e IVA extra ya que solo 
                 -- considera el de la periodicidad estandar
@@ -1036,6 +1041,107 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
             RETURN;
     END pGeneraTablaAmortizacion;
 
+    PROCEDURE pGeneraTablaAmortPrePago(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
+                                       pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
+                                       pIdPrestamo      IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
+                                       pNumAmortizacion IN SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE,
+                                       pTxRespuesta     OUT VARCHAR2)
+    IS
+       vlSaldoFinal      SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlSaldoInicial    SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlImpInteres      SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlImpIVAInteres   SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlImpPago         SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlImpCapitAmort   SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+       vlPlazo           SIM_PRESTAMO.PLAZO%TYPE;
+       vlTasaInteres     SIM_TABLA_AMORTIZACION.TASA_INTERES%TYPE;
+       vlTasaIVA         SIM_CAT_SUCURSAL.TASA_IVA%TYPE;    
+
+       vlImpIntDevXDia   SIM_TABLA_AMORTIZACION.IMP_PAGO%TYPE;
+    
+       CURSOR curAmortizaciones IS
+          SELECT *
+            FROM SIM_TABLA_AMORTIZACION
+           WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+                 CVE_EMPRESA           = pCveEmpresa    AND
+                 ID_PRESTAMO           = pIdPrestamo    AND
+                 NUM_PAGO_AMORTIZACION > pNumAmortizacion
+           ORDER BY NUM_PAGO_AMORTIZACION;
+
+    BEGIN
+       
+        -- Recupera el saldo inicial
+        SELECT IMP_SALDO_FINAL
+          INTO vlSaldoFinal
+          FROM SIM_TABLA_AMORTIZACION
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+               CVE_EMPRESA           = pCveEmpresa    AND
+               ID_PRESTAMO           = pIdPrestamo    AND
+               NUM_PAGO_AMORTIZACION = pNumAmortizacion;
+        
+        -- Recupera el nuevo plazo, a partir de la amortizacion siguiente a la que se le aplico un prepago de capital
+        SELECT MAX(NUM_PAGO_AMORTIZACION)
+          INTO vlPlazo
+          FROM SIM_TABLA_AMORTIZACION
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+               CVE_EMPRESA           = pCveEmpresa    AND
+               ID_PRESTAMO           = pIdPrestamo;
+        
+        -- Recupera la tasa de IVA
+        BEGIN
+           SELECT S.TASA_IVA
+             INTO vlTasaIVA
+             FROM SIM_PRESTAMO P, SIM_CAT_SUCURSAL S
+            WHERE P.CVE_GPO_EMPRESA   = pCveGpoEmpresa     AND
+                  P.CVE_EMPRESA       = pCveEmpresa        AND
+                  P.ID_PRESTAMO       = pIdPrestamo        AND
+                  P.CVE_GPO_EMPRESA   = S.CVE_GPO_EMPRESA  AND
+                  P.CVE_EMPRESA       = S.CVE_EMPRESA      AND
+                  P.ID_SUCURSAL       = S.ID_SUCURSAL;
+
+            EXCEPTION 
+                 WHEN NO_DATA_FOUND THEN
+                      pTxRespuesta    := 'No existe el registro de la SUCURSAL';
+        END;
+
+        -- Itera las amortizaciones posteriores a la amortizacion recibida como parametro
+        FOR vlAmortizacion IN curAmortizaciones LOOP
+            vlSaldoInicial    := vlSaldoFinal;
+            vlImpInteres      := ROUND(vlSaldoInicial * vlAmortizacion.TASA_INTERES / (1+vlTasaIVA / 100), 10);
+            vlImpIVAInteres   := ROUND(vlImpInteres * (vlTasaIVA / 100), 10);            
+            vlImpPago         := ROUND((NVL(vlSaldoInicial, 0) * NVL(vlAmortizacion.TASA_INTERES, 0)) /
+                                      (1 - (1 / POWER(1 + NVL(vlAmortizacion.TASA_INTERES, 0), (vlPlazo - vlAmortizacion.NUM_PAGO_AMORTIZACION + 1) ) ) ), 10);
+            vlImpCapitAmort   := ROUND(vlImpPago - (NVL(vlImpInteres, 0) + NVL(vlImpIVAInteres, 0) ), 10);
+            vlSaldoFinal      := ROUND(vlSaldoFinal - vlImpCapitAmort, 10);
+
+            -- Actualiza el importe de interes devengado por dia, no incluye el interes e IVA extra ya que solo 
+            vlImpIntDevXDia   := (vlImpInteres + vlImpIVAInteres) / (vlAmortizacion.FECHA_AMORTIZACION - vlAmortizacion.F_INI_AMORTIZACION);
+            
+            -- Actualiza la tabla de amortizacion
+            UPDATE SIM_TABLA_AMORTIZACION
+               SET IMP_SALDO_INICIAL     = vlSaldoInicial,
+                   IMP_INTERES           = vlImpInteres,
+                   IMP_IVA_INTERES       = vlImpIVAInteres,
+                   IMP_PAGO              = vlImpPago,
+                   IMP_CAPITAL_AMORT     = vlImpCapitAmort,
+                   IMP_SALDO_FINAL       = vlSaldoFinal,
+                   IMP_INTERES_DEV_X_DIA = vlImpIntDevXDia
+             WHERE CVE_GPO_EMPRESA   = pCveGpoEmpresa     AND
+                   CVE_EMPRESA       = pCveEmpresa        AND
+                   ID_PRESTAMO       = pIdPrestamo        AND
+                   NUM_PAGO_AMORTIZACION = vlAmortizacion.NUM_PAGO_AMORTIZACION;
+        END LOOP;
+
+        pTxrespuesta := 'La tabla para el metodo 06 del préstamo ' || pIdPrestamo || ' se generó correctamente.';
+
+        EXCEPTION
+           WHEN OTHERS THEN
+                ROLLBACK;
+                pTxrespuesta := 'Error global al calcular la ta tabla para el metodo 06 del préstamo '||pIdPrestamo||' '||SQLERRM;
+                RETURN;
+                
+    END pGeneraTablaAmortPrePago;
+
     PROCEDURE pAplicaPagoCredito(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                  pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
                                  pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
@@ -1095,6 +1201,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
            WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
              AND CVE_EMPRESA     = pCveEmpresa
              AND ID_PRESTAMO     = pIdPrestamo
+             AND SIT_MOVIMIENTO <> cSitCancelada
              AND NVL(F_APLICACION,F_LIQUIDACION) > pFValor;
              
           EXCEPTION 
@@ -1295,14 +1402,17 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                                         pTxrespuesta     OUT VARCHAR2)
     RETURN NUMBER
     IS
-        vlImpSaldo          PFIN_SALDO.SDO_EFECTIVO%TYPE;
-        vlIdCuentaRef       SIM_PRESTAMO.ID_CUENTA_REFERENCIA%TYPE;
-        vlImpNeto           PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE;
-        vlImpConcepto       PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE := 0;
-        vlIdPreMovto        PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE;
-        vlIdMovimiento      PFIN_PRE_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
-        vlValidaPagoPuntual SIM_TABLA_AMORTIZACION.CVE_GPO_EMPRESA%TYPE;
-        lbPagoCompleto      BOOLEAN;
+        vlImpSaldo               PFIN_SALDO.SDO_EFECTIVO%TYPE;
+        vlIdCuentaRef            SIM_PRESTAMO.ID_CUENTA_REFERENCIA%TYPE;
+        vlImpNeto                PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE;
+        vlImpConcepto            PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE := 0;
+        vlImpCapitalPendLiquidar PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE := 0;
+        vlImpCapitalPrepago      PFIN_PRE_MOVIMIENTO.IMP_NETO%TYPE := 0;
+        vlIdPreMovto             PFIN_PRE_MOVIMIENTO.ID_PRE_MOVIMIENTO%TYPE;
+        vlIdMovimiento           PFIN_PRE_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
+        vlValidaPagoPuntual      SIM_TABLA_AMORTIZACION.CVE_GPO_EMPRESA%TYPE;
+        lbPagoCompleto           BOOLEAN;
+        vlCveMetodo              SIM_PRESTAMO.CVE_METODO%TYPE;
 
     -- Obtiene los conceptos del credito actualizados, los recupera de la tabla de amortizacion y de la de accesorios,
     -- toma la informacion original y le resta lo realmente pagado       
@@ -1342,6 +1452,14 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
         vlImpSaldo      := pImportePago;
         vlImpNeto       := 0;
         lbPagoCompleto  := FALSE;
+        
+        -- Recupera el metodo del prestamo
+        SELECT NVL(CVE_METODO, '00')
+          INTO vlCveMetodo
+          FROM SIM_PRESTAMO
+         WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa AND
+               CVE_EMPRESA     = pCveEmpresa    AND
+               ID_PRESTAMO     = pIdPrestamo;
         
         -- Se obtiene el id del premovimiento
         SELECT  SQ01_PFIN_PRE_MOVIMIENTO.NEXTVAL INTO vlIdPreMovto FROM DUAL;
@@ -1387,6 +1505,50 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
             END IF;
         END LOOP;
            
+        -- Cuando es el metodo seis y aun sobra saldo, es necesario pagar capital adelantado y recalcular la tabla de 
+        -- amortizacion para los pagos subsecuentes
+        -- Solo se puede adelantar hasta el capital pendiente de pago
+        IF vlImpSaldo > 0 AND vlCveMetodo = '06' THEN
+           
+           -- Calcula el capital pendiente de liquidar, si el cliente tiene mas saldo que esto, liquida el credito
+           SELECT SUM(IMP_CAPITAL_AMORT)
+             INTO vlImpCapitalPendLiquidar
+             FROM SIM_TABLA_AMORTIZACION
+            WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+                  CVE_EMPRESA           = pCveEmpresa    AND
+                  ID_PRESTAMO           = pIdPrestamo    AND
+                  NUM_PAGO_AMORTIZACION > pNumAmortizacion;
+           
+           IF vlImpSaldo > vlImpCapitalPendLiquidar THEN
+              vlImpCapitalPrepago := vlImpCapitalPendLiquidar;
+           ELSE 
+              vlImpCapitalPrepago := vlImpSaldo;
+           END IF;
+           
+           -- Actualiza el importe neto y el saldo sobrante 
+           vlImpNeto  := vlImpNeto  + vlImpCapitalPrepago;
+           vlImpSaldo := vlImpSaldo - vlImpCapitalPrepago;
+
+           -- Actualiza el concepto de capital en el premovimiento           
+           UPDATE PFIN_PRE_MOVIMIENTO_DET
+              SET IMP_CONCEPTO = IMP_CONCEPTO + vlImpCapitalPrepago
+            WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+                  CVE_EMPRESA           = pCveEmpresa    AND
+                  ID_PRE_MOVIMIENTO     = vlIdPreMovto   AND
+                  CVE_CONCEPTO          = 'CAPITA';
+           
+           -- Actualiza el saldo final en el pago (amortizacion), asi como el capital prepagado, el capital lo actualiza
+           -- el metodo que actualizar la tabla de amortizacion
+           UPDATE SIM_TABLA_AMORTIZACION 
+              SET IMP_CAPITAL_AMORT_PREPAGO = vlImpCapitalPrepago,
+                  IMP_SALDO_FINAL           = IMP_SALDO_FINAL - vlImpCapitalPrepago
+            WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa
+              AND CVE_EMPRESA           = pCveEmpresa
+              AND ID_PRESTAMO           = pIdPrestamo
+              AND NUM_PAGO_AMORTIZACION = pNumAmortizacion;
+              
+        END IF;
+        
         -- Se actualiza el monto del premovimiento
         UPDATE PFIN_PRE_MOVIMIENTO
            SET IMP_NETO            = vlImpNeto
@@ -1411,6 +1573,11 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
 
         -- Actualiza la informacion de la tabla de amortizacion y de los accesorios con el movimiento generado
         pActualizaTablaAmortizacion(pCveGpoEmpresa, pCveEmpresa, vlIdMovimiento, pTxRespuesta);
+        
+        -- Si es el metodo 06 y existio prepago, envia a actualizar la tabla de amortizacion del siguiente pago en adelante
+        IF vlImpCapitalPrepago > 0 AND vlCveMetodo = '06' THEN
+           pGeneraTablaAmortPrePago(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, pNumAmortizacion, pTxRespuesta);
+        END IF;
         
         RETURN 0;
 
