@@ -620,6 +620,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
         vlNumAmortizacion   SIM_TABLA_AMORTIZACION.NUM_PAGO_AMORTIZACION%TYPE;
         vlFValor            SIM_TABLA_AMORTIZACION.FECHA_AMORTIZACION%TYPE;
         vlBPagado           SIM_TABLA_AMORTIZACION.B_PAGADO%TYPE;
+	vlImpDeudaMinima    SIM_PARAMETRO_GLOBAL.DEUDA_MINIMA%TYPE;
         
         -- Cursor de conceptos pagados por el movimiento
         CURSOR curConceptoPagado IS 
@@ -692,9 +693,17 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
                CVE_EMPRESA           = pCveEmpresa    AND
                ID_PRESTAMO           = vlIdPrestamo   AND
                NUM_PAGO_AMORTIZACION = vlNumAmortizacion;
+
+        -- Recupera el valor de la deuda minima
+        SELECT DEUDA_MINIMA
+          INTO vlImpDeudaMinima
+          FROM SIM_PARAMETRO_GLOBAL 
+         WHERE CVE_GPO_EMPRESA       = pCveGpoEmpresa AND
+               CVE_EMPRESA           = pCveEmpresa;
+
         
-        -- Verifica si se liquido el pago total del credito
-        IF vlImpDeuda > -.02 THEN 
+       -- Verifica si se liquido el pago total del credito
+        IF vlImpDeuda > -vlImpDeudaMinima THEN 
            vlBPagado := cVerdadero ;
         ELSE 
            vlBPagado := cFalso;
