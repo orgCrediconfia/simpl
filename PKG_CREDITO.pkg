@@ -128,6 +128,113 @@ End Pkg_Credito;
 create or replace
 PACKAGE BODY PKG_CREDITO AS
 
+    FUNCTION actualizaDiasAntiguedad (pCveGpoEmpresa   IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                      pCveEmpresa      IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                      pFValor          IN PFIN_PARAMETRO.F_MEDIO%TYPE,
+                                      pImpDeudaMinima IN SIM_PARAMETRO_GLOBAL.IMP_DEUDA_MINIMA%TYPE)
+    RETURN NUMBER
+    IS
+    
+      vlFechaDiasAntiguedad DATE;
+      vlDiasAntiguedad NUMBER;
+      vlValorEncontrado VARCHAR2(1);
+      vlIdDistribucionPago SIM_CAT_FORMA_DISTRIBUCION.ID_FORMA_DISTRIBUCION%TYPE;
+      vlSumaPagosCapital SIM_TABLA_AMORTIZACION.IMP_CAPITAL_AMORT_PAGADO%TYPE;
+      vlIdPrestamo NUMBER;
+    
+      --Cursor prestamos
+      CURSOR curPrestamos IS
+        SELECT P.ID_PRESTAMO, P.ID_GRUPO
+          FROM SIM_PRESTAMO P
+         WHERE P.CVE_GPO_EMPRESA = pCveGpoEmpresa
+           AND P.CVE_EMPRESA     = pCveEmpresa
+        ORDER BY P.ID_PRESTAMO;
+        
+      --Cursor de cada importe que se tiene que pagar a capital y su fecha de amortización para un prestamo
+      CURSOR curAmortizacionesCapital IS
+        SELECT IMP_CAPITAL_AMORT, FECHA_AMORTIZACION
+          FROM SIM_TABLA_AMORTIZACION
+         WHERE CVE_GPO_EMPRESA   = pCveGpoEmpresa
+           AND CVE_EMPRESA       = pCveEmpresa
+           AND ID_PRESTAMO       = vlIdPrestamo
+         ORDER BY NUM_PAGO_AMORTIZACION;        
+     
+    BEGIN
+      -- Itera todos los prestamos
+      FOR vlBufPrestamo IN curPrestamos LOOP
+      
+        vlFechaDiasAntiguedad  := '';
+        vlDiasAntiguedad       := 0;  
+        vlValorEncontrado      := CFALSO;
+        
+        --Obtienen la forma de distribucion del pago del prestamo
+        SELECT NVL(P.ID_FORMA_DISTRIBUCION,0) ID_FORMA_DISTRIBUCION
+          INTO vlIdDistribucionPago
+          FROM SIM_PRESTAMO P, SIM_CAT_FORMA_DISTRIBUCION D
+         WHERE P.CVE_GPO_EMPRESA          = pCveGpoEmpresa
+           AND P.CVE_EMPRESA              = pCveEmpresa
+           AND P.ID_PRESTAMO              = vlBufPrestamo.ID_PRESTAMO
+           AND D.CVE_GPO_EMPRESA(+)       = P.CVE_GPO_EMPRESA
+           AND D.CVE_EMPRESA(+)           = P.CVE_EMPRESA
+           AND D.ID_FORMA_DISTRIBUCION(+) = P.ID_FORMA_DISTRIBUCION;
+           
+        IF vlIdDistribucionPago = 1 THEN
+          --El calculo de dias de antiguedad se hace sobre el capital
+          --Falta incluir cuando el último concepto a pagar es un accesorio
+          
+          --Obtiene la suma total de pagos aplicados a capital del prestamo
+          SELECT SUM(TA.IMP_CAPITAL_AMORT_PAGADO) IMP_CAPITAL_AMORT_PAGADO
+            INTO vlSumaPagosCapital
+            FROM SIM_TABLA_AMORTIZACION TA
+           WHERE TA.CVE_GPO_EMPRESA = pCveGpoEmpresa
+             AND TA.CVE_EMPRESA     = pCveEmpresa
+             AND TA.ID_PRESTAMO     = vlBufPrestamo.ID_PRESTAMO;
+            
+          vlIdPrestamo := vlBufPrestamo.ID_PRESTAMO;
+          
+          -- Itera cada importe que se tiene que pagar a capital y su fecha de amortización de un prestamo
+          FOR vlBufAmortizaciones IN curAmortizacionesCapital LOOP
+            
+            vlSumaPagosCapital := vlSumaPagosCapital - vlBufAmortizaciones.IMP_CAPITAL_AMORT;
+            IF  vlValorEncontrado = CFALSO THEN
+              IF (vlSumaPagosCapital < -pImpDeudaMinima AND pFValor >=  vlBufAmortizaciones.FECHA_AMORTIZACION) THEN
+                --En esta fecha no alcanzo a cubrir el pago a Capital
+                vlFechaDiasAntiguedad := vlBufAmortizaciones.FECHA_AMORTIZACION;
+                --Resta de la fecha valor la fecha donde no alcanzo a pagar el capital
+                vlDiasAntiguedad := pFValor -vlFechaDiasAntiguedad;
+                vlValorEncontrado := CVERDADERO;
+ 
+              END IF;
+            END IF;
+            
+          END LOOP;
+        
+         --Actualiza los días de antiguedad para el prestamo individual
+         UPDATE SIM_PRESTAMO
+             SET NUM_DIAS_ANTIGUEDAD = vlDiasAntiguedad
+           WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+             AND CVE_EMPRESA         = pCveEmpresa
+             AND ID_PRESTAMO         = vlIdPrestamo;
+          
+          --Actualiza los días de antiguedad para el prestamo grupal
+          UPDATE SIM_PRESTAMO_GRUPO
+             SET NUM_DIAS_ANTIGUEDAD = CASE WHEN vlDiasAntiguedad >= NVL(NUM_DIAS_ANTIGUEDAD,0) THEN vlDiasAntiguedad
+                                            ELSE NUM_DIAS_ANTIGUEDAD
+                                       END
+           WHERE CVE_GPO_EMPRESA     = pCveGpoEmpresa
+             AND CVE_EMPRESA         = pCveEmpresa
+             AND ID_GRUPO            = vlBufPrestamo.ID_GRUPO;             
+        
+        END IF;
+      
+      END LOOP;
+      
+      RETURN 0;
+      
+      EXCEPTION
+        WHEN OTHERS THEN RETURN -1;
+    END actualizaDiasAntiguedad;
+    
     FUNCTION actualizaFechasPrestamo (pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                       pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
                                       pIdPrestamo     IN SIM_PRESTAMO.ID_PRESTAMO%TYPE,
@@ -1747,6 +1854,8 @@ PACKAGE BODY PKG_CREDITO AS
                WHERE A.CVE_GPO_EMPRESA = pCveGpoEmpresa AND
                      A.CVE_EMPRESA     = pCveEmpresa;
                      
+               -- Actualiza los dias de antiguedad de todos los prestamos
+               vgResultado := actualizaDiasAntiguedad (pCveGpoEmpresa, pCveEmpresa, pFValor, vlImpDeudaMinima);
                -- Actualiza las fechas de todos los prestamos
                DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos individuales');               
                vgResultado := actualizaFechasPrestamo (pCveGpoEmpresa, pCveEmpresa, 0, vlBEsGrupo);
