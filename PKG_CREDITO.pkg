@@ -447,8 +447,6 @@ PACKAGE BODY PKG_CREDITO AS
         -- de lo contrario lo divide entre la periodicidad de la tasa de referencia.
         -- por ultimo multiplica el dato por los dias del prestamo.
         SELECT 	ROUND(DECODE(P.TIPO_TASA,'No indexada', P.VALOR_TASA, T.VALOR)
-			-- CALCULO DE FACTOR DE AJUSTE QUE SOLO APLICA A CREDITOS CON PERIODICIDAD CATORCENAL
-			* DECODE(P.ID_PERIODICIDAD_PRODUCTO,7, 30/28, 1)
                         * (1 + pTasaIva / 100) / 100
 			/ DECODE(P.TIPO_TASA,'No indexada', PT.DIAS, PTI.DIAS)
 			* PP.DIAS
