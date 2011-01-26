@@ -2089,7 +2089,7 @@ PACKAGE BODY PKG_CREDITO AS
 
         -- Se genera el premovimiento
         PKG_PROCESOS.pGeneraPreMovto(pCveGpoEmpresa, pCveEmpresa, vlIdPreMovto, vgFechaSistema, pIdCuenta, pIdPrestamo,
-                                     cDivisaPeso, cPagoPrestamo, vlImpNeto, 'PRESTAMO', 'PRESTAMO', 'Pago de préstamo',
+                                     cDivisaPeso, cPagoPrestamo, vlImpNeto, 'PRESTAMO', 'PRESTAMO', 'Pago de prestamo',
                                      NULL, pCveUsuario, pFValor, pNumAmortizacion, pTxrespuesta);            
 
         IF pTxrespuesta IS NOT NULL THEN 
