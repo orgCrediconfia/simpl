@@ -1,14 +1,14 @@
-create or replace
-PACKAGE PKG_CREDITO AS
+CREATE OR REPLACE PACKAGE PKG_CREDITO AS
 
     -- Declaración de variables globales
     vgFechaSistema                      DATE;
-    cFalso                              CONSTANT VARCHAR2(1)                        := 'F';
-    cVerdadero                          CONSTANT VARCHAR2(1)                        := 'V';
-    cDivisaPeso                         CONSTANT PFIN_MOVIMIENTO.CVE_DIVISA%TYPE    := 'MXP';
-    cPagoPrestamo                       CONSTANT PFIN_MOVIMIENTO.CVE_OPERACION%TYPE := 'CRPAGOPRES';
-    cSitCancelada                       CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE  := 'CA';
+    cFalso                              CONSTANT VARCHAR2(1)                                     := 'F';
+    cVerdadero                          CONSTANT VARCHAR2(1)                                     := 'V';
+    cDivisaPeso                         CONSTANT PFIN_MOVIMIENTO.CVE_DIVISA%TYPE                 := 'MXP';
+    cPagoPrestamo                       CONSTANT PFIN_MOVIMIENTO.CVE_OPERACION%TYPE              := 'CRPAGOPRES';
+    cSitCancelada                       CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE             := 'CA';
     vgResultado                         NUMBER;
+    cEtapaLiquidado                     CONSTANT SIM_CAT_ETAPA_PRESTAMO.ID_ETAPA_PRESTAMO%TYPE   := 8;
     
     -- Procedimiento que actuliza la informacion variable de los creditos, esto lo realiza para todas las amortizaciones
     -- pendientes de pago
@@ -125,8 +125,8 @@ PACKAGE PKG_CREDITO AS
 End Pkg_Credito;
 /
 
-create or replace
-PACKAGE BODY PKG_CREDITO AS
+
+CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
 
     FUNCTION actualizaDiasAntiguedad (pCveGpoEmpresa   IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                       pCveEmpresa      IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
@@ -417,19 +417,6 @@ PACKAGE BODY PKG_CREDITO AS
             WHEN OTHERS THEN
                 RETURN NULL;
     END dameIdTasaRefDet;
-
-    PROCEDURE AsignaFechaSistema(pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
-                                 pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE)
-    IS 
-    BEGIN
-        -- Obtiene la fecha del sistema y actualiza la variable global vgFechaSistema
-        SELECT F_MEDIO
-          INTO vgFechaSistema
-          FROM PFIN_PARAMETRO
-         WHERE CVE_GPO_EMPRESA = pCveGpoEmpresa
-           AND CVE_EMPRESA     = pCveEmpresa
-           AND CVE_MEDIO       = 'SYSTEM';
-    END AsignaFechaSistema;
 
     FUNCTION DameTasaAmort(pCveGpoEmpresa   IN SIM_PRESTAMO.CVE_GPO_EMPRESA%TYPE,
                            pCveEmpresa      IN SIM_PRESTAMO.CVE_EMPRESA%TYPE,
@@ -1025,9 +1012,9 @@ PACKAGE BODY PKG_CREDITO AS
    	
    	    -- Cursor que obtiene los accesorios que tiene relacionados el préstamo
         SELECT C.ID_CARGO_COMISION, C.ID_FORMA_APLICACION, C.VALOR VALOR_CARGO, U.VALOR VALOR_UNIDAD, 
-               PC.DIAS DIAS_CARGO, PP.DIAS DIAS_PRODUCTO, CA.TASA_IVA 
+               PC.DIAS DIAS_CARGO, PP.DIAS DIAS_PRODUCTO, CASE WHEN NVL(CA.TASA_IVA,0) <> 0 THEN NVL(SUC.TASA_IVA ,0) ELSE 0 END AS TASA_IVA
           FROM SIM_PRESTAMO P, SIM_PRESTAMO_CARGO_COMISION C, SIM_CAT_ACCESORIO CA, SIM_CAT_PERIODICIDAD PC, 
-               SIM_CAT_PERIODICIDAD PP, SIM_CAT_UNIDAD U
+               SIM_CAT_PERIODICIDAD PP, SIM_CAT_UNIDAD U, SIM_CAT_SUCURSAL SUC
           WHERE P.CVE_GPO_EMPRESA 	         = pCveGpoEmpresa
             AND P.CVE_EMPRESA     	         = pCveEmpresa
             AND P.ID_PRESTAMO     	         = pIdPrestamo
@@ -1047,6 +1034,9 @@ PACKAGE BODY PKG_CREDITO AS
             AND P.CVE_GPO_EMPRESA 	         = PP.CVE_GPO_EMPRESA(+)
             AND P.CVE_EMPRESA     	         = PP.CVE_EMPRESA(+)
             AND P.ID_PERIODICIDAD_PRODUCTO   = PP.ID_PERIODICIDAD(+)
+            AND P.CVE_GPO_EMPRESA 	         = SUC.CVE_GPO_EMPRESA(+)
+            AND P.CVE_EMPRESA     	         = SUC.CVE_EMPRESA(+)
+            AND P.ID_SUCURSAL                = SUC.ID_SUCURSAL(+)
             AND C.ID_FORMA_APLICACION          NOT IN (1,2);
     BEGIN
         -- Inicializa datos del buffer con los parametros del procedimiento
@@ -1055,7 +1045,7 @@ PACKAGE BODY PKG_CREDITO AS
         V.ID_PRESTAMO       := pIdPrestamo;
         
         -- Se asigna la fecha del sistema a la variable global
-        AsignaFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+        vgFechaSistema := PKG_PROCESOS.DameFechaSistema(pCveGpoEmpresa,pCveEmpresa);
 
         BEGIN
             -- Revisa que no exista ningun movimiento de pago de prestamo para este prestamo, en caso de existir
@@ -1451,19 +1441,19 @@ PACKAGE BODY PKG_CREDITO AS
            ORDER BY NUM_PAGO_AMORTIZACION;
     BEGIN
     
-        BEGIN 
+       BEGIN 
             -- Se asigna la fecha del sistema a la variable global
-            AsignaFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+            vgFechaSistema := PKG_PROCESOS.DameFechaSistema(pCveGpoEmpresa,pCveEmpresa);
             
             EXCEPTION
                 WHEN NO_DATA_FOUND THEN
                     pTxrespuesta := 'No se encuentra la fecha del sistema ';
                     RETURN;
-        END;        
+       END;        
         
-        DBMS_OUTPUT.PUT_LINE('Paso fecha = ' || vgFechaSistema);
+       --DBMS_OUTPUT.PUT_LINE('Paso fecha = ' || vgFechaSistema);
         
-        BEGIN -- Se obtiene el id de la cuenta asociada al credito
+       BEGIN -- Se obtiene el id de la cuenta asociada al credito
             SELECT ID_CUENTA_REFERENCIA
               INTO vlIdCuenta
               FROM SIM_PRESTAMO
@@ -1475,17 +1465,17 @@ PACKAGE BODY PKG_CREDITO AS
                 WHEN NO_DATA_FOUND THEN
                     pTxrespuesta := 'No existe el préstamo';
                     RETURN;
-        END;
+       END;
         
-        IF vlIdCuenta IS NULL THEN
-           pTxrespuesta := 'El prestamo no tiene asociada la cuenta de referencia';
-           RETURN;
-        END IF;
+       IF vlIdCuenta IS NULL THEN
+          pTxrespuesta := 'El prestamo no tiene asociada la cuenta de referencia';
+          RETURN;
+       END IF;
  
-        DBMS_OUTPUT.PUT_LINE('Paso recuperacion de cuenta: ' || vlIdCuenta);
+       --DBMS_OUTPUT.PUT_LINE('Paso recuperacion de cuenta: ' || vlIdCuenta);
  
-        -- Valida que la fecha valor no sea menor a un pago previo
-        BEGIN
+       -- Valida que la fecha valor no sea menor a un pago previo
+       BEGIN
           SELECT COUNT(1)
             INTO vlMovtosPosteriores
             FROM PFIN_MOVIMIENTO
@@ -1497,15 +1487,29 @@ PACKAGE BODY PKG_CREDITO AS
              
           EXCEPTION 
               WHEN NO_DATA_FOUND THEN vlMovtosPosteriores := 0;
-        END;
+       END;
 
-        IF vlMovtosPosteriores > 0 THEN
-           pTxrespuesta := 'Existen movimientos con fecha valor posterior a este movimiento';
-           RETURN;
-        END IF;
+       IF vlMovtosPosteriores > 0 THEN
+          pTxrespuesta := 'Existen movimientos con fecha valor posterior a este movimiento';
+          RETURN;
+       END IF;
 
-        DBMS_OUTPUT.PUT_LINE('Paso recuperacion de movtos posteriores: ' || vlMovtosPosteriores);
+       --DBMS_OUTPUT.PUT_LINE('Paso recuperacion de movtos posteriores: ' || vlMovtosPosteriores);
+
+       -- Valida que la fecha valor no sea mayor a la fecha del sistema
+       IF pFValor > vgFechaSistema THEN
+          pTxrespuesta := 'La fecha valor es posterior a la fecha del dia';
+          RETURN;
+       END IF;
         
+       -- Actualiza la informacion del credito
+       vlResultado := fActualizaInformacionCredito(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, pFValor, pTxRespuesta);
+
+       IF vlResultado <> 0 THEN
+          pTxrespuesta := 'Error al actualizar la informacion del credito a la fecha valor. ' || pTxrespuesta;
+          RETURN;
+       END IF;
+       
        -- Ejecuta el pago de cada amortizacion mientras exista una amortizacion pendiente de pagar y el cliente 
        -- tenga saldo en su cuenta
        FOR vlBufAmortizaciones IN curAmortizacionesPendientes LOOP
@@ -1531,22 +1535,20 @@ PACKAGE BODY PKG_CREDITO AS
                        vlImpSaldo := 0;
            END;
 
-           DBMS_OUTPUT.PUT_LINE('Recupero saldo: ' || vlImpSaldo);
-           
-           -- Valida que si el pago es con fecha valor anterior a la fecha de amortizacion y la tabla tiene recargos, envia un error
+           --DBMS_OUTPUT.PUT_LINE('Recupero saldo: ' || vlImpSaldo);
            
            IF vlImpSaldo > 0 THEN
              vlResultado := pAplicaPagoCreditoPorAmort(pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, vlBufAmortizaciones.NUM_PAGO_AMORTIZACION, 
                                                        vlImpSaldo, vlIdCuenta, pCveUsuario, pFValor, pTxrespuesta);
 
-             DBMS_OUTPUT.PUT_LINE('Aplico pago a la amortizacion: ' || vlBufAmortizaciones.NUM_PAGO_AMORTIZACION);             
+             --DBMS_OUTPUT.PUT_LINE('Aplico pago a la amortizacion: ' || vlBufAmortizaciones.NUM_PAGO_AMORTIZACION);             
            ELSE
               EXIT;
            END IF;
 
        END LOOP;
        
-       DBMS_OUTPUT.PUT_LINE('Fin pAplicaPagoCredito');             
+       --DBMS_OUTPUT.PUT_LINE('Fin pAplicaPagoCredito');             
 
     END pAplicaPagoCredito;
     
@@ -1572,12 +1574,12 @@ PACKAGE BODY PKG_CREDITO AS
        -- Recupera las tablas de amortizacion de un prestamo       
        CURSOR curPorPrestamo IS
            SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
-                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+                  CASE WHEN T.FECHA_AMORTIZACION < pFValor THEN ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) ELSE 0 END AS IMP_PAGO_TARDIO
              FROM SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
             WHERE T.CVE_GPO_EMPRESA       = pCveGpoEmpresa
               AND T.CVE_EMPRESA           = pCveEmpresa
               AND T.ID_PRESTAMO           = pIdPrestamo
-              AND T.FECHA_AMORTIZACION    < pFValor
+--              AND T.FECHA_AMORTIZACION    < pFValor
               AND T.B_PAGADO              = cFalso
               AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
               AND T.CVE_EMPRESA           = P.CVE_EMPRESA
@@ -1588,7 +1590,7 @@ PACKAGE BODY PKG_CREDITO AS
        -- Recupera las tablas de amortizacion de un prestamo grupal
        CURSOR curPorGpoPrestamo IS
            SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
-                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+                  CASE WHEN T.FECHA_AMORTIZACION < pFValor THEN ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) ELSE 0 END AS IMP_PAGO_TARDIO
              FROM SIM_PRESTAMO_GPO_DET G, SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
             WHERE G.CVE_GPO_EMPRESA       = pCveGpoEmpresa
               AND G.CVE_EMPRESA           = pCveEmpresa
@@ -1596,7 +1598,7 @@ PACKAGE BODY PKG_CREDITO AS
               AND G.CVE_GPO_EMPRESA       = T.CVE_GPO_EMPRESA
               AND G.CVE_EMPRESA           = T.CVE_EMPRESA
               AND G.ID_PRESTAMO           = T.ID_PRESTAMO
-              AND T.FECHA_AMORTIZACION    < pFValor
+--              AND T.FECHA_AMORTIZACION    < pFValor
               AND T.B_PAGADO              = cFalso
               AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
               AND T.CVE_EMPRESA           = P.CVE_EMPRESA
@@ -1607,11 +1609,11 @@ PACKAGE BODY PKG_CREDITO AS
        -- Recupera las tablas de amortizacion de todos los prestamos
        CURSOR curTodo IS
            SELECT T.CVE_GPO_EMPRESA, T.CVE_EMPRESA, T.ID_PRESTAMO, T.NUM_PAGO_AMORTIZACION, 
-                  ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) AS IMP_PAGO_TARDIO
+                  CASE WHEN T.FECHA_AMORTIZACION < pFValor THEN ROUND(NVL(P.MONTO_FIJO_PERIODO,0),2) ELSE 0 END AS IMP_PAGO_TARDIO
              FROM SIM_TABLA_AMORTIZACION T, SIM_PRESTAMO P
             WHERE T.CVE_GPO_EMPRESA       = pCveGpoEmpresa
               AND T.CVE_EMPRESA           = pCveEmpresa
-              AND T.FECHA_AMORTIZACION    < pFValor
+--              AND T.FECHA_AMORTIZACION    < pFValor
               AND T.B_PAGADO              = cFalso
               AND T.CVE_GPO_EMPRESA       = P.CVE_GPO_EMPRESA
               AND T.CVE_EMPRESA           = P.CVE_EMPRESA
@@ -1755,20 +1757,24 @@ PACKAGE BODY PKG_CREDITO AS
           -- Procesa todos los creditos
           -- ******************************************************************************************************          
           WHEN pIdPrestamo = 0 THEN
-               DBMS_OUTPUT.PUT_LINE('Procesando todos los creditos');
+               --DBMS_OUTPUT.PUT_LINE('Procesando todos los creditos');
                FOR vlBufAmorizacion IN curTodo LOOP
-                   DBMS_OUTPUT.PUT_LINE('Procesando el credito : ' || vlBufAmorizacion.ID_PRESTAMO || ' Amortizacion : ' || vlBufAmorizacion.IMP_PAGO_TARDIO);
+
+                   --DBMS_OUTPUT.PUT_LINE('Procesando el credito : ' || vlBufAmorizacion.ID_PRESTAMO || ' Amortizacion : ' || vlBufAmorizacion.IMP_PAGO_TARDIO);
+
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
                    
-                   DBMS_OUTPUT.PUT_LINE('Pago tardio : ' || vlBufAmorizacion.IMP_PAGO_TARDIO || ' Interes : ' || vlInteresMora);
+
+                   --DBMS_OUTPUT.PUT_LINE('Pago tardio : ' || vlBufAmorizacion.IMP_PAGO_TARDIO || ' Interes : ' || vlInteresMora);
+
                    UPDATE SIM_TABLA_AMORTIZACION
                       SET IMP_PAGO_TARDIO      = vlBufAmorizacion.IMP_PAGO_TARDIO,
                           IMP_INTERES_MORA     = vlInteresMora,
                           IMP_IVA_INTERES_MORA = vlIVAInteresMora,
                           F_VALOR_CALCULO      = pFValor,
                           NUM_DIA_ATRASO       = CASE 
-                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima THEN pFValor - FECHA_AMORTIZACION
+                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima AND pFValor > FECHA_AMORTIZACION THEN pFValor - FECHA_AMORTIZACION
                                                     WHEN (B_PAGADO = cVerdadero OR (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) < vlImpDeudaMinima) AND 
                                                          NVL(FECHA_AMORT_PAGO_ULTIMO, FECHA_AMORTIZACION) > FECHA_AMORTIZACION THEN FECHA_AMORT_PAGO_ULTIMO - FECHA_AMORTIZACION
                                                     ELSE 0
@@ -1779,7 +1785,7 @@ PACKAGE BODY PKG_CREDITO AS
                       AND NUM_PAGO_AMORTIZACION = vlBufAmorizacion.NUM_PAGO_AMORTIZACION;
                END LOOP;
 
-               DBMS_OUTPUT.PUT_LINE('Actualiza la informacion del atraso (SIM_PRESTAMO) para los prestamos individuales');
+               --DBMS_OUTPUT.PUT_LINE('Actualiza la informacion del atraso (SIM_PRESTAMO) para los prestamos individuales');
                -- Actualiza la informacion del atraso (SIM_PRESTAMO) para los prestamos individuales
                FOR vlBufPrestamo IN curDiasAtrasoTodo LOOP
                    UPDATE SIM_PRESTAMO
@@ -1792,7 +1798,7 @@ PACKAGE BODY PKG_CREDITO AS
                           ID_PRESTAMO     = vlBufPrestamo.ID_PRESTAMO;
                END LOOP;
 
-               DBMS_OUTPUT.PUT_LINE('Actualiza la informacion del atraso (SIM_PRESTAMO_GPO) para los prestamos grupales');
+               --DBMS_OUTPUT.PUT_LINE('Actualiza la informacion del atraso (SIM_PRESTAMO_GPO) para los prestamos grupales');
                -- Actualiza la informacion del atraso (SIM_PRESTAMO_GPO) para los prestamos grupales
                FOR vlBufPrestamo IN curDiasAtrasoPresGpoTodo LOOP
                    UPDATE SIM_PRESTAMO_GRUPO
@@ -1805,7 +1811,7 @@ PACKAGE BODY PKG_CREDITO AS
                           ID_PRESTAMO_GRUPO = vlBufPrestamo.ID_PRESTAMO;
                END LOOP;
                
-               DBMS_OUTPUT.PUT_LINE('Actualiza la categoria de todos los prestamos individuales');               
+               --DBMS_OUTPUT.PUT_LINE('Actualiza la categoria de todos los prestamos individuales');               
                -- Actualiza la categoria de todos los prestamos individuales
 
                FOR vlBufPrestamo IN curPrestamoIndCatTodo LOOP
@@ -1816,7 +1822,7 @@ PACKAGE BODY PKG_CREDITO AS
                           ID_PRESTAMO       = vlBufPrestamo.ID_PRESTAMO;
                END LOOP;
 
-               DBMS_OUTPUT.PUT_LINE('Actualiza la categoria de todos los prestamos grupales');
+               --DBMS_OUTPUT.PUT_LINE('Actualiza la categoria de todos los prestamos grupales');
                -- Actualiza la categoria de todos los prestamos grupales
 
                FOR vlBufPrestamo IN curPrestamoGpoCatTodo LOOP
@@ -1857,16 +1863,16 @@ PACKAGE BODY PKG_CREDITO AS
                -- Actualiza los dias de antiguedad de todos los prestamos
                vgResultado := actualizaDiasAntiguedad (pCveGpoEmpresa, pCveEmpresa, pFValor, vlImpDeudaMinima);
                -- Actualiza las fechas de todos los prestamos
-               DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos individuales');               
+               --DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos individuales');               
                vgResultado := actualizaFechasPrestamo (pCveGpoEmpresa, pCveEmpresa, 0, vlBEsGrupo);
-               DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos grupales');                              
+               --DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos grupales');                              
                vgResultado := actualizaFechasPrestamoGpo (pCveGpoEmpresa, pCveEmpresa, 0);
 
           -- ******************************************************************************************************
           -- Procesa un grupo
           -- ******************************************************************************************************          
           WHEN vlBEsGrupo = cVerdadero THEN
-               DBMS_OUTPUT.PUT_LINE('Procesando un grupo');          
+               --DBMS_OUTPUT.PUT_LINE('Procesando un grupo');          
                FOR vlBufAmorizacion IN curPorGpoPrestamo LOOP
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
@@ -1877,7 +1883,7 @@ PACKAGE BODY PKG_CREDITO AS
                           IMP_IVA_INTERES_MORA = vlIVAInteresMora,
                           F_VALOR_CALCULO      = pFValor,
                           NUM_DIA_ATRASO       = CASE 
-                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima THEN pFValor - FECHA_AMORTIZACION
+                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima AND pFValor > FECHA_AMORTIZACION THEN pFValor - FECHA_AMORTIZACION
                                                     WHEN (B_PAGADO = cVerdadero OR (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) < vlImpDeudaMinima) AND 
                                                          NVL(FECHA_AMORT_PAGO_ULTIMO, FECHA_AMORTIZACION) > FECHA_AMORTIZACION THEN FECHA_AMORT_PAGO_ULTIMO - FECHA_AMORTIZACION
                                                     ELSE 0
@@ -1943,16 +1949,16 @@ PACKAGE BODY PKG_CREDITO AS
                      A.ID_GRUPO        = vlIdGrupo;
                      
                -- Actualiza las fecha del prestamo grupal
-               DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos individuales del grupo');
+               --DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de todos los prestamos individuales del grupo');
                vgResultado := actualizaFechasPrestamo (pCveGpoEmpresa, pCveEmpresa, 0, vlBEsGrupo);               
-               DBMS_OUTPUT.PUT_LINE('Actualiza las fechas del prestamo grupal');
+               --DBMS_OUTPUT.PUT_LINE('Actualiza las fechas del prestamo grupal');
                vgResultado := actualizaFechasPrestamoGpo (pCveGpoEmpresa, pCveEmpresa, vlIdGrupo);
                
           -- ******************************************************************************************************
           -- Procesa un credito individual
           -- ******************************************************************************************************
           ELSE 
-               DBMS_OUTPUT.PUT_LINE('Procesando un credito');
+               --DBMS_OUTPUT.PUT_LINE('Procesando un credito');
                FOR vlBufAmorizacion IN curPorPrestamo LOOP
                    pDameInteresMoratorio(vlBufAmorizacion.CVE_GPO_EMPRESA, vlBufAmorizacion.CVE_EMPRESA, vlBufAmorizacion.ID_PRESTAMO,
                                          vlBufAmorizacion.NUM_PAGO_AMORTIZACION, pFValor, vlInteresMora, vlIVAInteresMora, pTxRespuesta);
@@ -1963,7 +1969,7 @@ PACKAGE BODY PKG_CREDITO AS
                           IMP_IVA_INTERES_MORA = vlIVAInteresMora,
                           F_VALOR_CALCULO      = pFValor,
                           NUM_DIA_ATRASO       = CASE 
-                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima THEN pFValor - FECHA_AMORTIZACION
+                                                    WHEN B_PAGADO = cFalso AND (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) >= vlImpDeudaMinima AND pFValor > FECHA_AMORTIZACION THEN pFValor - FECHA_AMORTIZACION
                                                     WHEN (B_PAGADO = cVerdadero OR (IMP_CAPITAL_AMORT - IMP_CAPITAL_AMORT_PAGADO) < vlImpDeudaMinima) AND 
                                                          NVL(FECHA_AMORT_PAGO_ULTIMO, FECHA_AMORTIZACION) > FECHA_AMORTIZACION THEN FECHA_AMORT_PAGO_ULTIMO - FECHA_AMORTIZACION
                                                     ELSE 0
@@ -2005,7 +2011,7 @@ PACKAGE BODY PKG_CREDITO AS
                       NVL(NUM_DIAS_ATRASO_ACTUAL,0) > 39;
                       
                -- Actualiza las fecha del prestamo grupal
-               DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de un prestamo individual');               
+               --DBMS_OUTPUT.PUT_LINE('Actualiza las fechas de un prestamo individual');               
                vgResultado := actualizaFechasPrestamo (pCveGpoEmpresa, pCveEmpresa, pIdPrestamo, vlBEsGrupo);
                       
        --**************************************************************************************        
@@ -2113,7 +2119,7 @@ PACKAGE BODY PKG_CREDITO AS
                vlImpNeto   := vlImpNeto  + vlImpConcepto;
                vlImpSaldo  := vlImpSaldo - vlImpConcepto;
                     
-               dbms_output.put_line(vlBufDebe.CVE_CONCEPTO || ': ' || vlImpConcepto || '  SDO: '|| vlImpSaldo || '  NETO: ' || vlImpNeto);
+               --DBMS_OUTPUT.PUT_LINE(vlBufDebe.CVE_CONCEPTO || ': ' || vlImpConcepto || '  SDO: '|| vlImpSaldo || '  NETO: ' || vlImpNeto);
                     
                IF pTxrespuesta IS NOT NULL 
                   THEN RETURN 2; 
@@ -2339,8 +2345,7 @@ PACKAGE BODY PKG_CREDITO AS
       
       FOR vlProporcion IN curProporcion LOOP
           -- Despliega la informacion
-          DBMS_OUTPUT.PUT_LINE('Prestamo : ' || vlProporcion.ID_PRESTAMO || ' Importe : ' || vlProporcion.IMP_DEUDA ||
-                               ' Id Cliente: ' || vlProporcion.ID_CLIENTE || ' Nombre: ' || vlProporcion.NOM_COMPLETO);
+          --DBMS_OUTPUT.PUT_LINE('Prestamo : ' || vlProporcion.ID_PRESTAMO || ' Importe : ' || vlProporcion.IMP_DEUDA || ' Id Cliente: ' || vlProporcion.ID_CLIENTE || ' Nombre: ' || vlProporcion.NOM_COMPLETO);
                                
           vlImpProrrateado := vlImpProrrateado + vlProporcion.IMP_DEUDA;
       END LOOP;
@@ -2359,7 +2364,7 @@ PACKAGE BODY PKG_CREDITO AS
          vlImpAjuste := pImpPago - vlImpProrrateado;
       END IF;
       
-      DBMS_OUTPUT.PUT_LINE('Ajuste: ' || vlImpAjuste);
+      --DBMS_OUTPUT.PUT_LINE('Ajuste: ' || vlImpAjuste);
       
       OPEN vlCurSalida FOR
          SELECT A.CVE_GPO_EMPRESA, A.CVE_EMPRESA, A.ID_PRESTAMO, B.ID_CLIENTE, C.NOM_COMPLETO, 
@@ -2402,3 +2407,4 @@ PACKAGE BODY PKG_CREDITO AS
     END fCalculaProporcion;
     
 END PKG_CREDITO;
+/

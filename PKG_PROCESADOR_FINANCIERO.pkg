@@ -1,5 +1,4 @@
-create or replace
-PACKAGE PKG_PROCESADOR_FINANCIERO AS
+CREATE OR REPLACE PACKAGE PKG_PROCESADOR_FINANCIERO AS
 
     --Declaración de constantes
     cSitPreMovtoNoProcesado             CONSTANT PFIN_MOVIMIENTO.SIT_MOVIMIENTO%TYPE := 'NP';
@@ -31,26 +30,11 @@ PACKAGE PKG_PROCESADOR_FINANCIERO AS
                                  pTxrespuesta       OUT VARCHAR2)
     RETURN PFIN_MOVIMIENTO.ID_MOVIMIENTO%TYPE;
                                             
-
-
-
 END pkg_procesador_financiero;
 /
 
-create or replace
-PACKAGE BODY PKG_PROCESADOR_FINANCIERO AS
 
-    PROCEDURE AsignaFechaSistema(pCveGpoEmpresa  IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
-                                 pCveEmpresa     IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE)
-    IS 
-    BEGIN
-        SELECT  F_MEDIO
-        INTO    vgFechaSistema
-        FROM    PFIN_PARAMETRO
-        WHERE   CVE_GPO_EMPRESA = pCveGpoEmpresa
-            AND CVE_EMPRESA     = pCveEmpresa
-            AND CVE_MEDIO       = 'SYSTEM';
-    END AsignaFechaSistema;
+CREATE OR REPLACE PACKAGE BODY PKG_PROCESADOR_FINANCIERO AS
 
      FUNCTION  pProcesaMovimiento(pCveGpoEmpresa     IN PFIN_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                  pCveEmpresa        IN PFIN_MOVIMIENTO.CVE_EMPRESA%TYPE,
@@ -71,7 +55,7 @@ PACKAGE BODY PKG_PROCESADOR_FINANCIERO AS
     
         BEGIN    
             -- Se asigna la fecha del sistema a la variable global
-            AsignaFechaSistema(pCveGpoEmpresa,pCveEmpresa);
+            vgFechaSistema := PKG_PROCESOS.DameFechaSistema(pCveGpoEmpresa,pCveEmpresa);
             
             EXCEPTION
                 WHEN NO_DATA_FOUND THEN
@@ -262,3 +246,4 @@ PACKAGE BODY PKG_PROCESADOR_FINANCIERO AS
     END pProcesaMovimiento;
                                    
 END PKG_PROCESADOR_FINANCIERO;
+/
