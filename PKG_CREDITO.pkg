@@ -627,8 +627,8 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
         WHILE 1 = 1 LOOP
             vlDia := TO_CHAR(vlFechaTemp, 'D');
         
-            IF vlDia IN ('1','7') OR esDiaFestivo THEN
-                IF vlBufParametro.B_OPERA_DOMINGO           = 'V' AND vlDia = '1'  THEN
+            IF vlDia IN ('6','7') OR esDiaFestivo THEN
+                IF vlBufParametro.B_OPERA_DOMINGO           = 'V' AND vlDia = '6'  THEN
                     RETURN vlFechaTemp;
                 ELSIF vlBufParametro.B_OPERA_SABADO         = 'V' AND vlDia = '7'  THEN
                     RETURN vlFechaTemp;
