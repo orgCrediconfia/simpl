@@ -245,7 +245,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_PROCESOS AS
             WHILE NOT bFechaValida LOOP
                 BEGIN
                     vlDia := TO_CHAR(vlFechaT005, 'D');
-                    IF vlDia <> '1' AND vlDia <> '7' THEN
+                    IF vlDia <> '6' AND vlDia <> '7' THEN
                         BEGIN
                             SELECT  F_DIA_FESTIVO
                             INTO    vlFFestivo
