@@ -114,13 +114,35 @@ CREATE OR REPLACE PACKAGE PKG_CREDITO AS
                                           pTxRespuesta     OUT VARCHAR2);    
 
     -- Funcion que determina la proporcion del pago de acuerdo a un importe
-      FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+    FUNCTION fCalculaProporcion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
                                 pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
                                 pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
                                 pFValor          IN PFIN_PRE_MOVIMIENTO.F_APLICACION%TYPE,
                                 pImpPago         IN PFIN_MOVIMIENTO.IMP_NETO%TYPE,
                                 pTxRespuesta     OUT VARCHAR2)
     RETURN SYS_REFCURSOR;
+
+    -- Funcion utilizada para registrar el pago total de un credito individual en caso de que muera la persona
+    FUNCTION fRegistraMovtoDefuncion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                     pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                     pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER;
+    
+    -- Funcion utilizada para cancelar el ultimo pago que se haya aplicado al credito
+    FUNCTION fCancelaPago(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                          IdMovimientoPago IN PFIN_PRE_MOVIMIENTO.ID_MOVIMIENTO%TYPE,
+                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER;
+
+    -- Funcion utilizada para registrar los diferentes tipos de pagos extraordinarios
+    FUNCTION fRegistraMovtoExtraordinario(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                          pCveOperacion    IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE,
+                                          pArrayConceptos  IN TT_MOVTO_AJUSTE,
+                                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER;
 
 End Pkg_Credito;
 /
@@ -2405,6 +2427,45 @@ CREATE OR REPLACE PACKAGE BODY PKG_CREDITO AS
       RETURN vlCurSalida;
       
     END fCalculaProporcion;
+    
+    -- Funcion utilizada para registrar el pago total de un credito individual en caso de que muera la persona
+    FUNCTION fRegistraMovtoDefuncion(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                     pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                     pIdPrestamo      IN PFIN_PRE_MOVIMIENTO.ID_PRESTAMO%TYPE,
+                                     pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER
+    IS
+    BEGIN
+       pTxRespuesta := 'Movimiento aplicado con exito';
+       RETURN 0;
+    END;
+    
+    
+    -- Funcion utilizada para cancelar el ultimo pago que se haya aplicado al credito
+    FUNCTION fCancelaPago(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                          IdMovimientoPago IN PFIN_PRE_MOVIMIENTO.ID_MOVIMIENTO%TYPE,
+                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER
+    IS
+    BEGIN
+       pTxRespuesta := 'Movimiento aplicado con exito';
+       RETURN 0;
+    END;
+    
+
+    -- Funcion utilizada para registrar los diferentes tipos de pagos extraordinarios
+    FUNCTION fRegistraMovtoExtraordinario(pCveGpoEmpresa   IN PFIN_PRE_MOVIMIENTO.CVE_GPO_EMPRESA%TYPE,
+                                          pCveEmpresa      IN PFIN_PRE_MOVIMIENTO.CVE_EMPRESA%TYPE,
+                                          pCveOperacion    IN PFIN_PRE_MOVIMIENTO.CVE_OPERACION%TYPE,
+                                          pArrayConceptos  IN TT_MOVTO_AJUSTE,
+                                          pTxRespuesta     OUT VARCHAR2)
+    RETURN NUMBER
+    IS
+    BEGIN
+       pTxRespuesta := 'Movimiento aplicado con exito';
+       RETURN 0;
+    END;
     
 END PKG_CREDITO;
 /
